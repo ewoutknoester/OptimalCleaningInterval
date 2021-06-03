@@ -14,7 +14,10 @@ library(readxl) # Import excel sheets
 library(openxlsx) # Create excel sheets
 library(tidyverse) # tidy data
 library(panelr) # Convert data from wide to long
-
+library(lattice) # Regressions
+library(lme4) # Generalized and mixed linear models
+library(nlme) # gls
+library(emmeans) # Pairwise comparisons
 
 ```
 
@@ -25,7 +28,7 @@ raw.data <- read_excel("cleaning_exp.xlsx", sheet = "RAW DATA")
 raw.data.1 <- data.frame(raw.data)
 
 # Insert new columns Treatment & Size
-raw.data.1 <- as.data.frame(append(raw.data,list(Treatment = "",Size = ""),after = 7))
+raw.data.1 <- as.data.frame(append(raw.data.1,list(Treatment = "",Size = ""),after = 7))
 
 # Fill in the newly created variable 'Size' with conditional values from 'Length'
 raw.data.1$Size <- ifelse(
@@ -38,8 +41,23 @@ raw.data.1$Treatment <- ifelse(
   ifelse(raw.data.1$Structure %in% c("Tree 092", "Tree 093", "Tree 088"), "Monthly",
          ifelse(raw.data.1$Structure %in% c("Tree 099", "Tree 098", "Tree 094"), "Quarterly","Never")))
 
+# Insert new columns to calculate average SGR over whole period
+raw.data.1 <- as.data.frame(append(raw.data.1,list(Date.S8 = "2019-12-24", Length.S8 = NA, Width1.S8 = NA, 
+              Width2.S8 = NA, EV.S8 = NA, Condition.S8 = NA, Cause_death.S8 = NA, s_g_r.S8 = NA, 
+              Comments.S8 = NA), after = 73))
+
+# Calculate SGR over whole period
+raw.data.1$s_g_r.S8 <- log(raw.data.1$EV.S7/raw.data.1$EV.S1)/as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
+                       format="%Y-%m-%d") - as.Date(as.character(raw.data.1$Date.S1), format="%Y-%m-%d"))
+
+# Calculate change in EV as percentage over whole period (NB: expressed as percentage, as opposed to other EV values)
+raw.data.1$EV.S8 <- ((raw.data.1$EV.S7-raw.data.1$EV.S1)/raw.data.1$EV.S1)*100
+
+# Fill in end Condition for Average time factor (i.e. end survival will be used in analysis)
+raw.data.1$Condition.S8 <- raw.data.1$Condition.S7
+
 # Convert to long dataframe
-raw.data.2 <- as.data.frame(long_panel(raw.data.1, prefix = ".S", begin = 1, end = 7, label_location = "end"))
+raw.data.2 <- as.data.frame(long_panel(raw.data.1, prefix = ".S", begin = 1, end = 8, label_location = "end"))
 
 # Set correct names and data formats
 names(raw.data.2)[20] <- "SGR"
@@ -63,8 +81,9 @@ raw.data.2$Date <- factor(raw.data.2$Date)
 raw.data.2$Date[raw.data.2$Date == "09/2018"] <- "10/2018"
 raw.data.2$Date[raw.data.2$Date == "05/2019"] <- "04/2019"
 raw.data.2$Date <- droplevels(raw.data.2$Date)
-date.order = c("10/2018", "12/2018", "02/2019", "04/2019", "06/2019", "08/2019", "10/2019")
+date.order = c("10/2018", "12/2018", "02/2019", "04/2019", "06/2019", "08/2019", "10/2019", "12/2019")
 raw.data.2$Date <- factor(raw.data.2$Date, levels = date.order)
+raw.data.2$Date <- fct_recode(raw.data.2$Date, 'Average' = "12/2019")
 
 # Drop and reorder some columns
 clean.data <- raw.data.2 %>%
@@ -105,20 +124,135 @@ clean.data.1 <- clean.data.1[-which(clean.data.1$Cause_death == "Missing"),]
 # Data exploration
 ```{r data exploration}
 
-plot(clean.data.1$Treatment, clean.data.1$Condition)
-plot(clean.data.1$Treatment, clean.data.1$SGR)
-
-plot(clean.data.1$Species, clean.data.1$Condition)
-plot(clean.data.1$Species, clean.data.1$SGR)
-
-plot(clean.data.1$Size, clean.data.1$Condition)
-plot(clean.data.1$Size, clean.data.1$SGR)
-
 hist(clean.data.1$SGR)
 hist(clean.data.1$Condition)
 hist(clean.data.1$EV)
 
+# Function to facilitate averaging dataset
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x)))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
 
+# Get averages, split per Species, Size, Treatment and Date
+data.summary <- data_summary(clean.data.1, varname = "SGR", groupnames = c("Species", "Size", "Treatment", "Date"))
+
+ggplot(data.summary, aes(x = Date, fill = Size, y = SGR))+
+  geom_bar(stat = "identity", position = position_dodge())+
+  labs(y = "SGR")+ facet_grid(cols=vars(Treatment))+
+  facet_wrap(~Species + Treatment)+
+  geom_errorbar(aes(ymin=SGR-(2*se), ymax=SGR+(2*se)), width=.2,
+                position=position_dodge(.9))+
+  theme_light()
+
+```
+
+# SGR analysis
+## Model selection
+
+```{r SGR model selection}
+
+# Create subset for SGR where Condition > 80: Only healthy corals should be used to determine growth rate
+sgr.data <- subset(clean.data.1, Condition > 80 | is.na(Condition))
+sgr.data <- subset(sgr.data, !(is.na(SGR))) # Exclude SGR with NA
+
+# Simplify data by taking average SGR: ignore effect of time (bleaching event/seasons)
+sgr.data <- subset(sgr.data, Date == "Average")
+
+# Distribution of data
+ggplot(sgr.data,aes(x=SGR))+geom_histogram(bins = 12)+theme_bw()
+
+lme.sgr.0r  <- gls(SGR ~ Treatment*Species*Size, method = "REML", na.action = na.omit,
+                  data = sgr.data) # AIC = -3369
+lme.sgr.1r  <- lme(SGR ~ Treatment*Species*Size, method = "REML", na.action = na.omit, random = ~1 | Structure, 
+                  data = sgr.data) # AIC = -3378
+
+AIC(lme.sgr.0r, lme.sgr.1r) # Tree as random factor improves model substantially and solves pseudo-replication
+
+lme.sgr.1  <- lme(SGR ~ Treatment*Species*Size, na.action = na.omit, random = ~1 | Structure, 
+                  data = sgr.data) # AIC = -3378
+
+anova(lme.sgr.1) # Three-way interaction just not significant, and considering multiple comparisons better to leave
+
+# Comparing two-way interactions
+lme.sgr.2  <- lme(SGR ~ Treatment*Species + Treatment*Size + Species*Size, 
+                  na.action = na.omit, random = ~1 | Structure, data = sgr.data) # AIC = -3606
+
+anova(lme.sgr.2) # Treatment*Size interaction only just significant, better to leave out
+
+lme.sgr.3  <- lme(SGR ~ Treatment*Species + Species*Size, 
+                  na.action = na.omit, random = ~1 | Structure, data = sgr.data) # AIC = -3688
+
+anova(lme.sgr.3) # All terms highly significant: final model
+
+AIC(lme.sgr.0, lme.sgr.1, lme.sgr.2, lme.sgr.3) # lme.sgr.3 clearly favoured by AIC
+
+```
+
+## Model validation
+```{r SGR model validation}
+
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2))
+plot(resid(lme.sgr.3, type = "normalized") ~ fitted(lme.sgr.3))
+abline(0,0)
+plot(sgr.data$SGR, resid(lme.sgr.3, type = "normalized"))
+abline(0,0)
+hist(resid(lme.sgr.3, type = "normalized"), main = "")
+qqnorm(resid(lme.sgr.3, type = "normalized"))
+plot(sgr.data$Size, resid(lme.sgr.3, type = "normalized"))
+abline(0,0)
+plot(sgr.data$Species, resid(lme.sgr.3, type = "normalized"))
+abline(0,0)
+plot(sgr.data$Treatment, resid(lme.sgr.3, type = "normalized"))
+abline(0,0)
+plot(fitted(lme.sgr.3) ~ sgr.data$SGR)
+par(op)
+
+coplot(resid(lme.sgr.3, type = "normalized") ~ Size | Species, data = sgr.data)
+
+```
+
+## Post hoc and plots
+```{r}
+
+## Species*Size
+lsmeans(lme.sgr.2, pairwise ~ Species*Size, adjust = "tukey")
+
+se.sgr.2TS <- emmeans(lme.sgr.2, pairwise~Species*Size, type="response")
+
+# Get averages, split per Species and Size
+sgr.2SS.summary <- data_summary(sgr.data, varname = "SGR", groupnames = c("Size", "Species"))
+
+ggplot(sgr.2SS.summary, aes(x = Species, fill = Size, y = SGR))+
+  geom_bar(stat = "identity", position = position_dodge())+
+  labs(y = "SGR")+ #+facet_grid(cols=vars(Species)) +
+  geom_errorbar(aes(ymin=SGR-(2*se), ymax=SGR+(2*se)), width=.2,
+                position=position_dodge(.9))+
+  theme_light()
+
+## Species*Treatment
+lsmeans(lme.sgr.2, pairwise ~ Species*Treatment, adjust = "tukey")
+
+se.sgr.2ST <- emmeans(lme.sgr.2, pairwise~Species*Treatment, type="response")
+
+# Get averages, split per Species and Size
+sgr.2ST.summary <- data_summary(sgr.data, varname = "SGR", groupnames = c("Species", "Treatment"))
+
+ggplot(sgr.2ST.summary, aes(x = Species, fill = Treatment, y = SGR))+
+  geom_bar(stat = "identity", position = position_dodge())+
+  labs(y = "SGR")+ #+facet_grid(cols=vars(Species)) +
+  geom_errorbar(aes(ymin=SGR-(2*se), ymax=SGR+(2*se)), width=.2,
+                position=position_dodge(.9))+
+  theme_light()
 ```
 
 
