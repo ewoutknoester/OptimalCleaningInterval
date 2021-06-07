@@ -24,6 +24,7 @@ library(betareg) # Beta regression
 library(glmmTMB) # Betareg with random
 library(boot) # plot Betareg
 library(lmtest) # likelihood tests
+library(ggthemes) # pretty plots
 
 
 ```
@@ -49,16 +50,20 @@ raw.data.1$Treatment <- ifelse(
          ifelse(raw.data.1$Structure %in% c("Tree 099", "Tree 098", "Tree 094"), "Quarterly","Never")))
 
 # Insert new columns to calculate average SGR over whole period
-raw.data.1 <- as.data.frame(append(raw.data.1,list(Date.S8 = "2019-12-24", Length.S8 = NA, Width1.S8 = NA, 
-              Width2.S8 = NA, EV.S8 = NA, Condition.S8 = NA, Cause_death.S8 = NA, s_g_r.S8 = NA, 
+raw.data.1 <- as.data.frame(append(raw.data.1,list(Date.S8 = "2019-12-24", Length.S8 = NA,
+              Width1.S8 = NA, Width2.S8 = NA, EV.S8 = NA, Condition.S8 = NA, Cause_death.S8 = NA, s_g_r.S8 = NA, 
               Comments.S8 = NA), after = 73))
 
 # Calculate SGR over whole period
 raw.data.1$s_g_r.S8 <- log(raw.data.1$EV.S7/raw.data.1$EV.S1)/as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
                        format="%Y-%m-%d") - as.Date(as.character(raw.data.1$Date.S1), format="%Y-%m-%d"))
 
-# Calculate change in EV as percentage over whole period (NB: expressed as percentage, as opposed to other EV values)
+# Calculate change in EV as percentage over whole period (NB: expressed as percentage per year, as opposed to other EV values): value of 100% meaning it doubled in size 
 raw.data.1$EV.S8 <- ((raw.data.1$EV.S7-raw.data.1$EV.S1)/raw.data.1$EV.S1)*100
+# Standardize percentage increase in volume to one year (experiment duration was slightly longer than a year) using SGR
+raw.data.1$EV.S8 <- 100*exp((log((raw.data.1$EV.S8+100)/100)/(as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
+    format="%Y-%m-%d") - as.Date(as.character(raw.data.1$Date.S1),
+    format="%Y-%m-%d"))))*365)-100
 
 # Fill in end Condition for Average time factor (NB: end survival will be used in analysis)
 raw.data.1$Condition.S8 <- raw.data.1$Condition.S7
@@ -169,7 +174,7 @@ ggplot(data.summary, aes(x = Date, fill = Size, y = SGR))+
 ```{r SGR: linear model selection}
 
 # Create subset for SGR where Condition > 80: Only healthy corals should be used to determine SGR
-sgr.data <- subset(clean.data.1, Condition > 80 | is.na(Condition))
+sgr.data <- subset(clean.data.1, Condition >= 80 | is.na(Condition))
 sgr.data <- subset(sgr.data, !(is.na(SGR))) # Exclude SGR with NA
 
 # Simplify data by taking average SGR: ignore effect of time (bleaching event/seasons)
@@ -249,10 +254,11 @@ sgr.summary.SST <- as.data.frame(append(sgr.summary.SST,
     sep=":")), after = 0))
 # Create ID and order dataframe by name of Finder
 sgr.summary.SST <- tibble::rownames_to_column(sgr.summary.SST, "ID")
-sgr.summary.SST <- sgr.summary.SST[order(sgr.summary.SST$Finder),]
+sgr.summary.SST <- sgr.summary.SST[order(as.character(sgr.summary.SST$Finder)),]
 
 # Perform Tukey to get significance letters
-hsd.SST=HSD.test(aov(SGR~Species*Size*Treatment, data=sgr.data), trt = c("Species", "Size", "Treatment"), group = T)
+hsd.SST=HSD.test(aov(SGR~Species*Size*Treatment, data=sgr.data), trt = c("Species", "Size", "Treatment"),
+                 group = T)
 sig.letters.SST <- hsd.SST$groups
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
 sig.letters.SST <- tibble::rownames_to_column(sig.letters.SST, "Group")
@@ -836,7 +842,7 @@ ggplot(P.summary.Sp, aes(x = Species, y = EV.increase))+
 P.summary.Si <- data_summary(P.data, varname = "EV.increase", groupnames = c("Size"))
 # Create ID and order dataframe
 P.summary.Si <- tibble::rownames_to_column(P.summary.Si, "ID")
-P.summary.Si <- P.summary.Si[order(P.summary.Si$Size),]
+P.summary.Si <- P.summary.Si[order(as.character(P.summary.Si$Size)),]
 
 # Perform Tukey to get significance letters
 hsd.P.Si = HSD.test(aov(EV.increase ~ Size, data = P.data), trt = c("Size"), group = T)
@@ -849,7 +855,7 @@ sig.letters.P.Si <- sig.letters.P.Si[order(sig.letters.P.Si$Group),]
 P.summary.Si <- cbind(P.summary.Si, siglet = sig.letters.P.Si$groups)
 P.summary.Si <- P.summary.Si[order(as.numeric(P.summary.Si$ID)),]
 
-# Plot 
+# Treatment plot 
 ggplot(P.summary.Si, aes(x = Size, y = EV.increase))+
   geom_bar(stat = "identity", position = position_dodge())+
   labs(y = "Volume increase (%)")+
@@ -863,7 +869,7 @@ ggplot(P.summary.Si, aes(x = Size, y = EV.increase))+
 P.summary.T <- data_summary(P.data, varname = "EV.increase", groupnames = c("Treatment"))
 # Create ID and order dataframe
 P.summary.T <- tibble::rownames_to_column(P.summary.T, "ID")
-P.summary.T <- P.summary.T[order(P.summary.T$Treatment),]
+P.summary.T <- P.summary.T[order(as.character(P.summary.T$Treatment)),]
 
 # Perform Tukey to get significance letters
 hsd.P.T = HSD.test(aov(EV.increase ~ Treatment, data = P.data), trt = c("Treatment"), group = T)
@@ -879,11 +885,59 @@ P.summary.T <- P.summary.T[order(as.numeric(P.summary.T$ID)),]
 # Plot 
 ggplot(P.summary.T, aes(x = Treatment, y = EV.increase))+
   geom_bar(stat = "identity", position = position_dodge())+
-  labs(y = "Volume increase (%)")+
-  geom_errorbar(aes(ymin=EV.increase-(2*se), ymax=EV.increase+(2*se)), width=.2, position=position_dodge(.9))+
-  geom_text(data = P.summary.T, aes(x=Treatment, y = EV.increase + se*3, label = siglet), vjust=0,
-                position=position_dodge(.9))+
-  theme_light()
+  labs(y = expression(paste("Volume increase (% ", y^-1, ")")),
+       x = "Cleaning treatment")+
+  geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = P.summary.T, aes(x=Treatment, y = EV.increase + se*1.15, label = siglet), vjust=0,
+                position=position_dodge(.9), size = 5)+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x=element_text(size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )
+ggsave("EVincrease_Treatment.png")
+
+```
+
+```{r Production: costs}
+
+# Costs per treatment
+P.costs <- P.summary.T[,c(1,2,3)]
+
+# Calculate duration for each Treatment to reach 3900% increase
+P.costs <- P.costs %>% mutate(Days = log((3900 + 100)/100)/(log((EV.increase+100)/100)/365))
+
+# Calculate cleaning costs (number of times cleaning * costs)
+P.costs <- P.costs %>% mutate(Interval = c(7,30,91,365)) # Cleaning interval in days
+P.costs <- P.costs %>% mutate(Cleaning.visits = Days/Interval) # Number of cleaning visits
+P.costs$Cleaning.visits[P.costs$Treatment == "Never"] <- 0
+P.costs <- P.costs %>% mutate(Trees.cleaned = c(5,4,3, 1)) # Trees cleaned in one visit (less when dirtier)
+
+dive.cost <- 15 # 15 EUR per dive per diver: 1 diver can between 3 - 5 trees, depending on Treatment (how dirty)
+initial.cost <- 20 # 20 EUR for construction costs, deployment & filling tree with fragments
+
+P.costs <- P.costs %>% mutate(Costs = Cleaning.visits * (dive.cost/Trees.cleaned) + initial.cost)
+P.costs <- P.costs %>% mutate(Costs.fragment = Costs/60)
+
+# Plot
+scaleFUN <- function(x) sprintf("%.2f", x)
+
+ggplot(P.costs, aes(x = Treatment, y = Costs.fragment))+
+  geom_bar(stat = "identity", position = position_dodge())+
+  labs(y = "Cost per fragment (EUR)",
+       x = "Cleaning treatment")+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x=element_text(size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )+ 
+  scale_y_continuous(labels=scaleFUN)+
+  geom_text(aes(label = paste("€",  round(Costs.fragment, 2))), vjust = 1.5, size = 5, color="white")
+ggsave("Cost per fragment.png")
 
 ```
 
