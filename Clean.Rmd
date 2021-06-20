@@ -902,7 +902,8 @@ sig.letters.P.Si <- sig.letters.P.Si %>% mutate(.group = str_squish(.group)) # r
 
 # Merge sig.letter dataframe into the summary dataframe
 P.summary.Si <- cbind(P.summary.Si, siglet = sig.letters.P.Si$.group)
-P.summary.Si <- P.summary.Si[order(as.character(P.summary.Si$Size)),]
+P.summary.Si <- tibble::rownames_to_column(P.summary.Si, "ID")
+P.summary.Si <- P.summary.Si[order(as.numeric(P.summary.Si$ID)),]
 
 # Plot Species*Treatment bar graph + error bars + letters
 ggplot(P.summary.Si, aes(x = Size, y = EV.increase))+
@@ -939,7 +940,8 @@ sig.letters.P.T <- sig.letters.P.T %>% mutate(.group = str_squish(.group)) # rem
 
 # Merge sig.letter dataframe into the summary dataframe
 P.summary.T <- cbind(P.summary.T, siglet = sig.letters.P.T$.group)
-P.summary.T <- P.summary.T[order(as.character(P.summary.T$Treatment)),]
+P.summary.T <- tibble::rownames_to_column(P.summary.T, "ID")
+P.summary.T <- P.summary.T[order(as.numeric(P.summary.T$ID)),]
 
 # Plot Species*Treatment bar graph + error bars + letters
 ggplot(P.summary.T, aes(x = Treatment, y = EV.increase))+
@@ -984,6 +986,7 @@ initial.cost <- material.cost/5 + hour.wage*8/5 + dive.cost*2/3 + hour.wage * 4
 P.costs <- P.costs %>% 
   mutate(Costs = Cleaning.visits*(dive.cost/Trees.cleaned) + Cleaning.visits*(hour.wage*2/Trees.cleaned) + initial.cost)
 P.costs <- P.costs %>% mutate(Costs.fragment = Costs/60) # Per fragment (60 frags in 1 tree)
+P.costs <- P.costs[order(as.character(P.costs$Treatment)),]
 
 # Plot
 scaleFUN <- function(x) sprintf("%.2f", x) # Get two decimals on y-axis
@@ -1000,7 +1003,7 @@ ggplot(P.costs, aes(x = Treatment, y = Costs.fragment))+
     )+ 
   scale_y_continuous(labels=scaleFUN)+
   geom_text(aes(label = paste("€",  round(Costs.fragment, 2))), vjust = 1.45, size = 5, color="white")
-ggsave("Cost per fragment.png")
+ggsave("Cost per fragment.png", width = 23, height = 10, units = "cm")
 
 ```
 
