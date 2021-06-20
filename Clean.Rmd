@@ -8,6 +8,7 @@ output: html_document
 # Setup
 ```{r setup, include=FALSE}
 rm(list=ls()) # Clear workspace
+# MAKE SURE FILE IS SAVED BEFORE RUNNING THIS CODE:
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) #Set directory at current (make sure file is saved locally)
 
 library(readxl) # Import excel sheets
@@ -26,7 +27,20 @@ library(boot) # plot Betareg
 library(lmtest) # likelihood tests
 library(ggthemes) # pretty plots
 
-
+# Function to facilitate averaging dataset
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x)))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
 ```
 
 # Data import
@@ -55,13 +69,13 @@ raw.data.1 <- as.data.frame(append(raw.data.1,list(Date.S8 = "2019-12-24", Lengt
               Comments.S8 = NA), after = 73))
 
 # Calculate SGR over whole period
-raw.data.1$s_g_r.S8 <- log(raw.data.1$EV.S7/raw.data.1$EV.S1)/as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
+raw.data.1$s_g_r.S8<-log(raw.data.1$EV.S7/raw.data.1$EV.S1)/as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
                        format="%Y-%m-%d") - as.Date(as.character(raw.data.1$Date.S1), format="%Y-%m-%d"))
 
 # Calculate change in EV as percentage over whole period (NB: expressed as percentage per year, as opposed to other EV values): value of 100% meaning it doubled in size 
 raw.data.1$EV.S8 <- ((raw.data.1$EV.S7-raw.data.1$EV.S1)/raw.data.1$EV.S1)*100
 # Standardize percentage increase in volume to one year (experiment duration was slightly longer than a year) using SGR
-raw.data.1$EV.S8 <- 100*exp((log((raw.data.1$EV.S8+100)/100)/(as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
+raw.data.1$EV.S8<-100*exp((log((raw.data.1$EV.S8+100)/100)/(as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
     format="%Y-%m-%d") - as.Date(as.character(raw.data.1$Date.S1),
     format="%Y-%m-%d"))))*365)-100
 
@@ -72,7 +86,7 @@ raw.data.1$Condition.S8 <- raw.data.1$Condition.S7
 raw.data.2 <- as.data.frame(long_panel(raw.data.1, prefix = ".S", begin = 1, end = 8, label_location = "end"))
 
 # Set correct names and data formats
-names(raw.data.2)[20] <- "SGR"
+raw.data.2 = raw.data.2 %>% rename(SGR = s_g_r)
 raw.data.2$Species <- fct_recode(raw.data.2$Species, 'Pocillopora verrucosa' = "Pocillopora verucosa")
 raw.data.2$Species <- fct_recode(raw.data.2$Species, 'Acropora cf formosa' = "Acropora formosa")
 raw.data.2$SGR[raw.data.2$SGR == "NA"] <- NA
@@ -106,8 +120,6 @@ clean.data <- clean.data[,c(1,3,2,4,5,6,7,8,11,10,12,9)]
 clean.data$Length <- round(clean.data$Length, 1)
 clean.data$EV <- round(clean.data$EV, 0)
 clean.data$SGR <- round(clean.data$SGR, 3)
-
-
 ```
 
 # Data cleaning
@@ -131,7 +143,6 @@ plot(missing$Cause_death, missing$Size)
 # Decision to leave out missing fragments from analysis, as not related to Treatment
 clean.data.1 <- clean.data.1[-which(clean.data.1$Cause_death == "Missing"),]
 clean.data.1 <- clean.data.1[clean.data.1$id != "597", ] # Remove observation without start values
-
 ```
 
 # Data exploration
@@ -141,32 +152,16 @@ hist(clean.data.1$SGR)
 hist(clean.data.1$Condition)
 hist(clean.data.1$EV)
 
-# Function to facilitate averaging dataset
-data_summary <- function(data, varname, groupnames){
-  require(plyr)
-  summary_func <- function(x, col){
-    c(mean = mean(x[[col]], na.rm=TRUE),
-      sd = sd(x[[col]], na.rm=TRUE),
-      n  = length(x[[col]]),
-      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x)))
-  }
-  data_sum<-ddply(data, groupnames, .fun=summary_func,
-                  varname)
-  data_sum <- rename(data_sum, c("mean" = varname))
- return(data_sum)
-}
-
 # Get averages, split per Species, Size, Treatment and Date
 data.summary <- data_summary(clean.data.1, varname = "SGR", groupnames = c("Species", "Size", "Treatment", "Date"))
 
 ggplot(data.summary, aes(x = Date, fill = Size, y = SGR))+
-  geom_bar(stat = "identity", position = position_dodge())+
+  geom_bar(stat = "identity", position = position_dodge(), na.rm = TRUE)+
   labs(y = "SGR")+ facet_grid(cols=vars(Treatment))+
   facet_wrap(~Species + Treatment)+
   geom_errorbar(aes(ymin=SGR-(2*se), ymax=SGR+(2*se)), width=.2,
                 position=position_dodge(.9))+
   theme_light()
-
 ```
 
 # SGR analysis
@@ -210,73 +205,101 @@ AIC(lme.sgr.0r, lme.sgr.1r) # Tree as random factor improves model substantially
 # Checking for heterogeneity
 coplot(resid(lme.sgr.1r, type = "normalized") ~ Size | Species, data = sgr.data)
 
-# Allowing for heterogeneity amongst Specoies * Size
+# Allowing for heterogeneity amongst Species * Size
 lme.sgr.1  <- lme(SGR ~ Treatment*Species*Size, method = "ML", na.action = na.omit, random = ~1 | Structure, 
                   data = sgr.data, weights = varIdent(form = ~1 | Species * Size)) # AIC = -3385
 
 # Re-checking for heterogeneity
 coplot(resid(lme.sgr.1, type = "normalized") ~ Size | Species, data = sgr.data)
 
-anova(lme.sgr.1) # Three-way interaction signficant
+anova(lme.sgr.1) # Three-way interaction not signficant
 
+# Checking for 2-way interactions
+lme.sgr.2  <- lme(SGR ~ Treatment*Species + Treatment*Size + Species*Size, method = "ML", na.action = na.omit, random = ~1 | Structure, data = sgr.data, weights = varIdent(form = ~1 | Species * Size)) 
+lme.sgr.3  <- lme(SGR ~ Treatment*Species + Species*Size + Treatment*Size, method = "ML", na.action = na.omit, random = ~1 | Structure, data = sgr.data, weights = varIdent(form = ~1 | Species * Size)) 
+lme.sgr.4  <- lme(SGR ~ Treatment*Size + Species*Size + Treatment*Species, method = "ML", na.action = na.omit, random = ~1 | Structure, data = sgr.data, weights = varIdent(form = ~1 | Species * Size)) 
+
+# Treatment*Size only barely significant
+anova(lme.sgr.2)
+anova(lme.sgr.3)
+anova(lme.sgr.4)
+
+lme.sgr.5  <- lme(SGR ~ Treatment*Species + Species*Size, method = "ML", na.action = na.omit, random = ~1 | Structure, data = sgr.data, weights = varIdent(form = ~1 | Species * Size))
+lme.sgr.6  <- lme(SGR ~ Species*Size + Treatment*Species, method = "ML", na.action = na.omit, random = ~1 | Structure, data = sgr.data, weights = varIdent(form = ~1 | Species * Size))
+
+# Species*Treatment only just significant
+anova(lme.sgr.5)
+anova(lme.sgr.6)
+
+lme.sgr.7  <- lme(SGR ~ Species*Size, method = "ML", na.action = na.omit, random = ~1 | Structure, data = sgr.data, weights = varIdent(form = ~1 | Species * Size))
+lme.sgr.8  <- lme(SGR ~ Species*Size+Treatment, method = "ML", na.action = na.omit, random = ~1 | Structure, data = sgr.data, weights = varIdent(form = ~1 | Species * Size)) # for graphing Treament (though ns)
+
+AIC(lme.sgr.1, lme.sgr.3, lme.sgr.5, lme.sgr.7)
+anova(lme.sgr.7) # All factors highly significant: final model
 ```
 ## Model validation
 ```{r SGR model validation}
 
-op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2))
-plot(resid(lme.sgr.1, type = "pearson") ~ fitted(lme.sgr.1))
+mod <- lme.sgr.7 # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
 abline(0,0)
-plot(sgr.data$SGR, resid(lme.sgr.1, type = "pearson"))
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(sgr.data$Treatment, resid(mod, type = "pearson")) # residuals split over Date
 abline(0,0)
-hist(resid(lme.sgr.1, type = "pearson"), main = "")
-qqnorm(resid(lme.sgr.1, type = "pearson"))
-plot(sgr.data$Size, resid(lme.sgr.1, type = "pearson"))
+plot(sgr.data$Species, resid(mod, type = "pearson")) # residuals split over Treatment
 abline(0,0)
-plot(sgr.data$Species, resid(lme.sgr.1, type = "pearson"))
+plot(sgr.data$Size, resid(mod, type = "pearson")) # residuals split over Treatment
 abline(0,0)
-plot(sgr.data$Treatment, resid(lme.sgr.1, type = "pearson"))
-abline(0,0)
-plot(fitted(lme.sgr.1) ~ sgr.data$SGR)
+plot(fitted(mod) ~ sgr.data$SGR) # response data vs fitted
 par(op)
-
-coplot(resid(lme.sgr.1, type = "pearson") ~ Size | Species, data = sgr.data)
-
 ```
 ## Post hoc and plots
 ```{r SGR plot}
-# Size*Species*Treatment plot
 
+# Size*Species plot
 # Get averages
-sgr.summary.SST <- data_summary(sgr.data, varname = "SGR", groupnames = c("Species", "Size", "Treatment"))
-# Create unique Finder for each Species*Size*Treatment combination
-sgr.summary.SST <- as.data.frame(append(sgr.summary.SST,
-    list(Finder = paste(paste(sgr.summary.SST$Species, sgr.summary.SST$Size, sep=":"), sgr.summary.SST$Treatment,
-    sep=":")), after = 0))
+sgr.summary.SS <- data_summary(sgr.data, varname = "SGR", groupnames = c("Species", "Size"))
+# Create unique Finder for each Species*Size combination
+sgr.summary.SS <- as.data.frame(append(sgr.summary.SS,
+    list(Finder = paste(sgr.summary.SS$Species, sgr.summary.SS$Size, sep=":")), after = 0))
 # Create ID and order dataframe by name of Finder
-sgr.summary.SST <- tibble::rownames_to_column(sgr.summary.SST, "ID")
-sgr.summary.SST <- sgr.summary.SST[order(as.character(sgr.summary.SST$Finder)),]
+sgr.summary.SS <- tibble::rownames_to_column(sgr.summary.SS, "ID")
+sgr.summary.SS <- sgr.summary.SS[order(as.character(sgr.summary.SS$Finder)),]
 
-# Perform Tukey to get significance letters
-hsd.SST=HSD.test(aov(SGR~Species*Size*Treatment, data=sgr.data), trt = c("Species", "Size", "Treatment"),
-                 group = T)
-sig.letters.SST <- hsd.SST$groups
+# Perform post hoc and get significance letters (Compact Letter Display) between Treatments within each Date
+hsd.SS <- emmeans(lme.sgr.7, specs = pairwise ~ Size|Species, adjust = "tukey")
+#ph.all.log4$contrasts # Show the contrasts
+letters.SS <- multcomp::cld(hsd.SS$emmeans, decreasing = TRUE, alpha = 0.05, Letters = letters) # get CLD
+
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
-sig.letters.SST <- tibble::rownames_to_column(sig.letters.SST, "Group")
-sig.letters.SST <- sig.letters.SST[order(sig.letters.SST$Group),]
+letters.SS <- as.data.frame(append(letters.SS,
+    list(Finder = paste(letters.SS$Species, letters.SS$Size, sep=":")), after = 0))
+letters.SS <- letters.SS[order(letters.SS$Finder),]
+letters.SS <- letters.SS %>% mutate(.group = str_squish(.group)) # remove white spaces
 
 # Merge sig.letter dataframe into the summary dataframe
-sgr.summary.SST <- cbind(sgr.summary.SST, siglet = sig.letters.SST$groups)
-sgr.summary.SST <- sgr.summary.SST[order(as.numeric(sgr.summary.SST$ID)),]
+sgr.summary.SS <- cbind(sgr.summary.SS, siglet = letters.SS$.group)
+sgr.summary.SS <- sgr.summary.SS[order(as.numeric(sgr.summary.SS$ID)),]
 
 # Plot Species*Size*Treatment bar graph + error bars + letters
-ggplot(sgr.summary.SST, aes(x = Size, fill = Treatment, y = SGR))+
-  geom_bar(stat = "identity", position = position_dodge())+
-  labs(y = "SGR")+ facet_grid(rows=vars(Species)) +
-  geom_errorbar(aes(ymin=SGR-(2*se), ymax=SGR+(2*se)), width=.2,
-                position=position_dodge(.9))+
-  geom_text(data = sgr.summary.SST, aes(x=Size, y = SGR + se*3, label = siglet), vjust=0,
-                position=position_dodge(.9))+
-  theme_light()
+ggplot(sgr.summary.SS, aes(x = Species, fill = Size, y = SGR))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = expression(paste("SGR (", d^-1,")")), x = "Species")+
+  geom_errorbar(aes(ymin=SGR-(1*se), ymax=SGR+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = sgr.summary.SS, aes(x=Species, y = SGR + se*2, label = siglet),
+            vjust=0, position = position_dodge(.9))+
+  scale_fill_manual(values=c("#A9A9A9", "#7A7A7A", "#5A5A5A"))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold.italic", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )+
+scale_x_discrete(labels= c("A. formosa", "A. verweyi", "P. verrucosa", "P. cylindrica"))
+ggsave("SGR_Species x Size.png", width = 23, height = 10, units = "cm")
 
 # Treatment plot
 # Get averages
@@ -285,25 +308,31 @@ sgr.summary.T <- data_summary(sgr.data, varname = "SGR", groupnames = c("Treatme
 sgr.summary.T <- tibble::rownames_to_column(sgr.summary.T, "ID")
 sgr.summary.T <- sgr.summary.T[order(as.character(sgr.summary.T$Treatment)),]
 
-# Perform Tukey to get significance letters
-hsd.T = HSD.test(aov(SGR ~ Treatment, data = sgr.data), trt = c("Treatment"), group = T)
-sig.letters.T <- hsd.T$groups
-# Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
-sig.letters.T <- tibble::rownames_to_column(sig.letters.T, "Group")
-sig.letters.T <- sig.letters.T[order(sig.letters.T$Group),]
+# Perform post hoc and get significance letters (Compact Letter Display) between Treatments within each Date
+hsd.T <- emmeans(lme.sgr.8, specs = pairwise ~ Treatment, adjust = "tukey")
+letters.T <- multcomp::cld(hsd.T$emmeans, decreasing = TRUE, alpha = 0.05, Letters = letters) # get CLD
+letters.T <- letters.T[order(as.character(letters.T$Treatment)),]
+letters.T <- letters.T %>% mutate(.group = str_squish(.group)) # remove white spaces
 
 # Merge sig.letter dataframe into the summary dataframe
-sgr.summary.T <- cbind(sgr.summary.T, siglet = sig.letters.T$groups)
+sgr.summary.T <- cbind(sgr.summary.T, siglet = letters.T$.group)
 sgr.summary.T <- sgr.summary.T[order(as.numeric(sgr.summary.T$ID)),]
 
 # Plot Species*Size*Treatment bar graph + error bars + letters
 ggplot(sgr.summary.T, aes(x = Treatment, y = SGR))+
-  geom_bar(stat = "identity", position = position_dodge())+ labs(y = "SGR")+
-  geom_errorbar(aes(ymin=SGR-(2*se), ymax=SGR+(2*se)), width=.2, position=position_dodge(.9))+
-  geom_text(data = sgr.summary.T, aes(x=Treatment, y = SGR + se*3, label = siglet), vjust=0,
+  geom_bar(stat = "identity", position = position_dodge())+ylim(0,0.0119)+
+  labs(y = expression(paste("SGR (", d^-1,")")), x = "Treatment")+
+  geom_errorbar(aes(ymin=SGR-(1*se), ymax=SGR+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = sgr.summary.T, aes(x=Treatment, y = SGR + se*1.5, label = siglet), vjust=0,
                 position=position_dodge(.9))+
-  theme_light()
-
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x=element_text(size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )
+ggsave("SGR_Treatment.png", width = 23, height = 10, units = "cm")
 ```
 
 # Survival analysis
@@ -320,17 +349,16 @@ surv.data <- subset(surv.data, Date == "Average")
 surv.data <- surv.data %>%
   select(-c("Length", "Cause_death", "SGR", "EV"))
 
+# Get averages per structure, split per Species, Size and Treatment
+surv.avg <- data_summary(surv.data, varname = "Condition", groupnames = c("Species", "Size", "Treatment", "Structure"))
+surv.avg <- surv.avg %>% select(-c("sd", "se"))
 ```
 ## Model selection
 ### Failed linear selection
 ```{r Survival: failed linear model selection}
 
-# Distribution of data: bimodal
+# Distribution of original data: bimodal
 ggplot(surv.data,aes(x=Condition))+geom_histogram(bins = 12)+theme_bw()
-
-# Get averages per structure, split per Species, Size and Treatment
-surv.avg <- data_summary(surv.data, varname = "Condition", groupnames = c("Species", "Size", "Treatment", "Structure"))
-surv.avg <- surv.avg %>% select(-c("sd", "se"))
 
 # Distribution of data after averaging: somewhat more normal
 ggplot(surv.avg, aes(x=Condition)) + geom_histogram (bins = 12) + theme_bw()
@@ -361,25 +389,22 @@ lm.surv.2  <- gls(Condition ~ Species*Size*Treatment, method = "ML",
 coplot(resid(lm.surv.2, type = "pearson") ~ Species | Treatment, data = surv.avg)
 
 # SQRT transformation didn't help, so have to look into betaregression
-
 ```
 ### Failed beta selection
 ```{r Survival: failed betareg model selection}
 
+# Create dataset
+surv.data.1 <- surv.data
+
 # Transform survival (%) into fraction (using un-averaged data)
-surv.data <- surv.data %>% mutate(Condition.f = Condition/100)
+surv.data.1 <- surv.data.1 %>% mutate(Condition.f = Condition/100)
 
 # Rescale so there are no 0 and 1 in the dataset
-surv.data <- surv.data %>% 
+surv.data.1 <- surv.data.1 %>% 
   mutate(Condition.fc = (Condition.f * (length(Condition.f) - 1) + 0.5) / length(Condition.f))
 
-# Remove ordering from factors for easier labelling
-surv.data.1 <- surv.data
-surv.data.1$Size <- factor(surv.data.1$Size, ordered = FALSE)
-surv.data.1$Treatment <- factor(surv.data.1$Treatment, ordered = FALSE)
-
 # Betareg null model
-bm0 <- betareg(Condition.fc ~ 1, data = surv.data)
+bm0 <- betareg(Condition.fc ~ 1, data = surv.data.1)
 
 # Betareg full model
 bm1 <- betareg(Condition.fc ~ Species*Size*Treatment, data = surv.data.1)
@@ -411,17 +436,21 @@ coplot(resid(bm2, type = "pearson") ~ Size | Species, data = surv.data.1)
 ### Successful beta selection
 ```{r AVG survival: betareg model selection}
 
+# Create dataset
+surv.avg.1 <- surv.avg
+
 # Transform survival (%) into fraction
-surv.avg<- surv.avg %>% mutate(Condition.f = Condition/100)
+surv.avg.1 <- surv.avg %>% mutate(Condition.f = Condition/100)
 
 # Rescale so there are no 0 and 1 in the dataset
-surv.avg<- surv.avg %>% 
+surv.avg.1<- surv.avg.1 %>% 
   mutate(Condition.fc = (Condition.f * (length(Condition.f) - 1) + 0.5) / length(Condition.f))
 
-# Remove ordering from factors for easier labelling
-surv.avg.1 <- surv.avg
-surv.avg.1$Size <- factor(surv.avg.1$Size, ordered = FALSE)
-surv.avg.1$Treatment <- factor(surv.avg.1$Treatment, ordered = FALSE)
+# Set ID
+surv.avg.1 <- tibble::rownames_to_column(surv.avg.1, "ID")
+
+# Remove (1) outlier based on ID: P. verrucosa, Large, Never cleaned:
+surv.avg.1 <- surv.avg.1[surv.avg.1$ID != "108", ]
 
 # Betareg null model
 bm0 <- betareg(Condition.fc ~ 1, data = surv.avg.1)
@@ -435,7 +464,7 @@ bm2 <- betareg(Condition.fc ~ Species*Size*Treatment | Species, data = surv.avg.
 bm3 <- betareg(Condition.fc ~ Species*Size*Treatment | Species*Treatment, data = surv.avg.1)
 bm4 <- betareg(Condition.fc ~ Species*Size*Treatment | Species*Size*Treatment, data = surv.avg.1)
 
-# Model 3 (variable precision for Species * Treatment) preferred
+# Model 3 (variable precision for Species * Treatment) preferred based on normality residuals
 AIC(bm1, bm2, bm3, bm4)
 
 # Bias correction
@@ -467,63 +496,31 @@ AIC(bm6, bm7, bm8) # No further reducation in AIC by removing either interaction
 ## Model validation
 ```{r AVG survival: model validation}
 
-op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2))
-plot(resid(bm6) ~ fitted(bm6))
+mod <- bm6 # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
 abline(0,0)
-plot(surv.avg.1$Condition.fc, resid(bm6))
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(surv.avg.1$Size, resid(mod, type = "pearson")) # residuals split over Date
 abline(0,0)
-hist(resid(bm6), main = "")
-qqnorm(resid(bm6))
-plot(surv.avg.1$Size, resid(bm6))
+plot(surv.avg.1$Species, resid(mod, type = "pearson")) # residuals split over Treatment
 abline(0,0)
-plot(surv.avg.1$Species, resid(bm6))
+plot(surv.avg.1$Treatment, resid(mod, type = "pearson")) # residuals split over Treatment
 abline(0,0)
-plot(surv.avg.1$Treatment, resid(bm6))
-abline(0,0)
-plot(fitted(bm6) ~ surv.avg.1$Condition.fc)
+plot(fitted(mod) ~ surv.avg.1$Condition.fc) # response data vs fitted
 par(op)
 
-coplot(resid(bm6) ~ Size | Species, data = surv.avg.1)
+# One outlier detected & removed (ID = 108)
+n <- nrow(surv.avg.1)
+cooksD <- cooks.distance(mod)
+plot(cooksD, main = "Cooks Distance for Influential Obs")
+abline(h = 4/n, lty = 2, col = "steelblue")
+influential <- cooksD[(cooksD > (3 * mean(cooksD, na.rm = TRUE)))]
 
 ```
 ## Post hoc and plots
 ```{r AVG survival: plots}
-
-# Post hoc comparison
-lsmeans(bm6, pairwise ~ Treatment*Species + Treatment*Size) 
-
-# Species * Size * Treatment plot
-# Get averages
-surv.summary <- data_summary(surv.data, varname = "Condition", groupnames = c("Species", "Size", "Treatment"))
-# Create unique Finder for each Species*Size*Treatment combination
-surv.summary <- as.data.frame(append(surv.summary,
-    list(Finder = paste(paste(surv.summary$Species, surv.summary$Size, sep=":"), surv.summary$Treatment,
-    sep=":")), after = 0))
-# Create ID and order dataframe by name of Finder
-surv.summary <- tibble::rownames_to_column(surv.summary, "ID")
-surv.summary <- surv.summary[order(surv.summary$Finder),]
-
-# Perform Tukey to get significance letters
-hsd.surv=HSD.test(aov(Condition.fc ~ Treatment*Species + Treatment*Size, data=surv.avg.1), 
-                 trt = c("Species", "Size", "Treatment"), group = T)
-sig.letters.surv <- hsd.surv$groups
-# Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
-sig.letters.surv <- tibble::rownames_to_column(sig.letters.surv, "Group")
-sig.letters.surv <- sig.letters.surv[order(sig.letters.surv$Group),]
-
-# Merge sig.letter dataframe into the summary dataframe
-surv.summary <- cbind(surv.summary, siglet = sig.letters.surv$groups)
-surv.summary <- surv.summary[order(as.numeric(surv.summary$ID)),]
-
-# Plot Species*Size*Treatment bar graph + error bars + letters
-ggplot(surv.summary, aes(x = Size, fill = Treatment, y = Condition))+
-  geom_bar(stat = "identity", position = position_dodge())+
-  labs(y = "Survival")+ facet_grid(rows=vars(Species)) +
-  geom_errorbar(aes(ymin=Condition-(2*se), ymax=Condition+(2*se)), width=.2,
-                position=position_dodge(.9))+
-  geom_text(data = surv.summary, aes(x=Size, y = Condition + se*3, label = siglet), vjust=0,
-                position=position_dodge(.9))+
-  theme_light()
 
 # Species * Treatment plot
 # Get averages
@@ -535,27 +532,40 @@ surv.summary.TSp <- as.data.frame(append(surv.summary.TSp,
 surv.summary.TSp <- tibble::rownames_to_column(surv.summary.TSp, "ID")
 surv.summary.TSp <- surv.summary.TSp[order(surv.summary.TSp$Finder),]
 
-# Perform Tukey to get significance letters
-hsd.surv.TSp=HSD.test(aov(Condition.fc ~ Treatment*Species, data=surv.avg.1), 
-                 trt = c("Species", "Treatment"), group = T)
-sig.letters.surv.TSp <- hsd.surv.TSp$groups
+# Post hoc comparison
+hsd.surv.TSp <- emmeans(bm6, specs = pairwise ~ Treatment|Species, adjust = "tukey") 
+sig.letters.surv.TSp <- multcomp::cld(hsd.surv.TSp$emmeans, alpha = 0.05, Letters = letters, decreasing = T) # get CLD
+
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
 sig.letters.surv.TSp <- tibble::rownames_to_column(sig.letters.surv.TSp, "Group")
-sig.letters.surv.TSp <- sig.letters.surv.TSp[order(sig.letters.surv.TSp$Group),]
+sig.letters.surv.TSp <- as.data.frame(append(sig.letters.surv.TSp,
+    list(Finder = paste(sig.letters.surv.TSp$Species, sig.letters.surv.TSp$Treatment, sep=":")), after = 0))
+sig.letters.surv.TSp <- sig.letters.surv.TSp[order(sig.letters.surv.TSp$Finder),]
+sig.letters.surv.TSp <- sig.letters.surv.TSp %>% mutate(.group = str_squish(.group)) # remove white spaces
 
 # Merge sig.letter dataframe into the summary dataframe
-surv.summary.TSp <- cbind(surv.summary.TSp, siglet = sig.letters.surv.TSp$groups)
+surv.summary.TSp <- cbind(surv.summary.TSp, siglet = sig.letters.surv.TSp$.group)
 surv.summary.TSp <- surv.summary.TSp[order(as.numeric(surv.summary.TSp$ID)),]
 
-# Plot Species*Size*Treatment bar graph + error bars + letters
+# Plot Species*Treatment bar graph + error bars + letters
 ggplot(surv.summary.TSp, aes(x = Species, fill = Treatment, y = Condition))+
-  geom_bar(stat = "identity", position = position_dodge())+
-  labs(y = "Survival")+
-  geom_errorbar(aes(ymin=Condition-(2*se), ymax=Condition+(2*se)), width=.2,
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Survival (%)", x = "Species")+
+  geom_errorbar(aes(ymin=Condition-(1*se), ymax=Condition+(1*se)), width=.2,
                 position=position_dodge(.9))+
-  geom_text(data = surv.summary.TSp, aes(x=Species, y = Condition + se*3, label = siglet), vjust=0,
+  geom_text(data = surv.summary.TSp, aes(x=Species, y = Condition + se*1.5, label = siglet), vjust=0,
                 position=position_dodge(.9))+
-  theme_light()
+  scale_fill_manual(values=c("#A9A9A9", "#7A7A7A", "#5A5A5A", "#3A3A3A"))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold.italic", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )+
+scale_x_discrete(labels= c("A. formosa", "A. verweyi", "P. verrucosa", "P. cylindrica"))+
+scale_y_continuous(breaks= c(0, 25, 50, 75, 100))
+ggsave("Survival(AVG)_Species x Treatment.png", width = 23, height = 10, units = "cm")
 
 # Size * Treatment plot
 # Get averages
@@ -567,54 +577,79 @@ surv.summary.TSi <- as.data.frame(append(surv.summary.TSi,
 surv.summary.TSi <- tibble::rownames_to_column(surv.summary.TSi, "ID")
 surv.summary.TSi <- surv.summary.TSi[order(surv.summary.TSi$Finder),]
 
-# Perform Tukey to get significance letters
-hsd.surv.TSi=HSD.test(aov(Condition.fc ~ Size*Treatment, data=surv.avg.1), 
-                 trt = c("Size", "Treatment"), group = T)
-sig.letters.surv.TSi <- hsd.surv.TSi$groups
+# Post hoc comparison
+hsd.surv.TSi <- emmeans(bm6, specs = pairwise ~ Treatment|Size, adjust = "tukey") 
+sig.letters.surv.TSi <- multcomp::cld(hsd.surv.TSi$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
+
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
 sig.letters.surv.TSi <- tibble::rownames_to_column(sig.letters.surv.TSi, "Group")
-sig.letters.surv.TSi <- sig.letters.surv.TSi[order(sig.letters.surv.TSi$Group),]
+sig.letters.surv.TSi <- as.data.frame(append(sig.letters.surv.TSi,
+    list(Finder = paste(sig.letters.surv.TSi$Size, sig.letters.surv.TSi$Treatment, sep=":")), after = 0))
+sig.letters.surv.TSi <- sig.letters.surv.TSi[order(sig.letters.surv.TSi$Finder),]
+sig.letters.surv.TSi <- sig.letters.surv.TSi %>% mutate(.group = str_squish(.group)) # remove white spaces
 
 # Merge sig.letter dataframe into the summary dataframe
-surv.summary.TSi <- cbind(surv.summary.TSi, siglet = sig.letters.surv.TSi$groups)
+surv.summary.TSi <- cbind(surv.summary.TSi, siglet = sig.letters.surv.TSi$.group)
 surv.summary.TSi <- surv.summary.TSi[order(as.numeric(surv.summary.TSi$ID)),]
 
-# Plot Species*Size*Treatment bar graph + error bars + letters
+# Plot Species*Treatment bar graph + error bars + letters
 ggplot(surv.summary.TSi, aes(x = Size, fill = Treatment, y = Condition))+
-  geom_bar(stat = "identity", position = position_dodge())+
-  labs(y = "Survival")+
-  geom_errorbar(aes(ymin=Condition-(2*se), ymax=Condition+(2*se)), width=.2,
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Survival (%)", x = "Size")+
+  geom_errorbar(aes(ymin=Condition-(1*se), ymax=Condition+(1*se)), width=.2,
                 position=position_dodge(.9))+
-  geom_text(data = surv.summary.TSi, aes(x=Size, y = Condition + se*3, label = siglet), vjust=0,
+  geom_text(data = surv.summary.TSi, aes(x=Size, y = Condition + se*1.5, label = siglet), vjust=0,
                 position=position_dodge(.9))+
-  theme_light()
+  scale_fill_manual(values=c("#A9A9A9", "#7A7A7A", "#5A5A5A", "#3A3A3A"))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )+
+scale_x_discrete(labels= c("Small", "Medium", "Large"))+
+scale_y_continuous(breaks= c(0, 25, 50, 75, 100))
+ggsave("Survival(AVG)_Size x Treatment.png", width = 23, height = 10, units = "cm")
 
-# Treatment plot
+# Treatment plot (ignoring interactions)
 # Get averages
 surv.summary.T <- data_summary(surv.data, varname = "Condition", groupnames = c("Treatment"))
-# Create ID and order dataframe 
+
+# Create ID and order dataframe by name of Finder
 surv.summary.T <- tibble::rownames_to_column(surv.summary.T, "ID")
 surv.summary.T <- surv.summary.T[order(as.character(surv.summary.T$Treatment)),]
 
-# Perform Tukey to get significance letters
-hsd.surv.T = HSD.test(aov(Condition.fc ~ Treatment, data=surv.avg.1), 
-                 trt = c("Treatment"), group = T)
-sig.letters.surv.T <- hsd.surv.T$groups
+# Post hoc comparison
+hsd.surv.T <- emmeans(bm6, specs = pairwise ~ Treatment, adjust = "tukey") 
+sig.letters.surv.T <- multcomp::cld(hsd.surv.T$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
+
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
-sig.letters.surv.T <- tibble::rownames_to_column(sig.letters.surv.T, "Group")
-sig.letters.surv.T <- sig.letters.surv.T[order(sig.letters.surv.T$Group),]
+sig.letters.surv.T <- sig.letters.surv.T[order(as.character(sig.letters.surv.T$Treatment)),]
+sig.letters.surv.T <- sig.letters.surv.T %>% mutate(.group = str_squish(.group)) # remove white spaces
 
 # Merge sig.letter dataframe into the summary dataframe
-surv.summary.T <- cbind(surv.summary.T, siglet = sig.letters.surv.T$groups)
+surv.summary.T <- cbind(surv.summary.T, siglet = sig.letters.surv.T$.group)
 surv.summary.T <- surv.summary.T[order(as.numeric(surv.summary.T$ID)),]
 
-# Plot Species*Size*Treatment bar graph + error bars + letters
+# Plot Species*Treatment bar graph + error bars + letters
 ggplot(surv.summary.T, aes(x = Treatment, y = Condition))+
-  geom_bar(stat = "identity", position = position_dodge())+ labs(y = "Survival")+
-  geom_errorbar(aes(ymin=Condition-(2*se), ymax=Condition+(2*se)), width=.2, position=position_dodge(.9))+
-  geom_text(data = surv.summary.T, aes(x=Treatment, y = Condition + se*3, label = siglet), vjust=0,
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Survival (%)", x = "Treatment")+
+  geom_errorbar(aes(ymin=Condition-(1*se), ymax=Condition+(1*se)), width=.2,
                 position=position_dodge(.9))+
-  theme_light()
+  geom_text(data = surv.summary.T, aes(x=Treatment, y = Condition + se*1.5, label = siglet), vjust=0,
+                position=position_dodge(.9))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )+
+scale_x_discrete(labels= c("Weekly", "Monthly", "Quarterly", "Never"))+
+scale_y_continuous(breaks= c(0, 25, 50, 75, 100))
+ggsave("Survival(AVG)_Treatment.png", width = 23, height = 10, units = "cm")
 
 ```
 
@@ -678,7 +713,7 @@ anova(lm.p.3) # Three-way interaction signficant
 # Create subset for Productio data
 P.data <- subset(clean.data.1, !(is.na(EV))) # Exclude EV with NA
 
-# Focus on percente increase in EV over whole study period
+# Focus on percentage increase in EV over whole study period
 P.data <- subset(P.data, Date == "Average")
 names(P.data)[12] <- "EV.increase"
 
@@ -699,11 +734,11 @@ ggplot(P.summary, aes(x = Size, fill = Treatment, y = EV.increase))+
   theme_light()
 
 # Full model without random factor
-lm.p.1nr  <- gls(EV.increase ~ Species*Size*Treatment, method = "REML", data = P.data) # AIC = 8610
+lm.p.1nr  <- gls(EV.increase ~ Species*Size*Treatment, method = "REML", data = P.data) # AIC = 8438
 
 # Full model with random factor
 lm.p.1  <- lme(EV.increase ~ Species*Size*Treatment, method = "REML", random = ~1 | Structure, 
-               data = P.data) # AIC = 8607
+               data = P.data) # AIC = 8437
 
 AIC(lm.p.1nr, lm.p.1) # Tree as random factor improves model substantially and solves pseudo-replication
 
@@ -711,6 +746,8 @@ AIC(lm.p.1nr, lm.p.1) # Tree as random factor improves model substantially and s
 coplot(resid(lm.p.1, type = "normalized") ~ Size | Species, data = P.data)
 
 # Allowing for heterogeneity
+lm.p.1  <- lme(EV.increase ~ Species*Size*Treatment, method = "ML", random = ~1 | Structure, 
+               data = P.data) # AIC = 8437
 lm.p.2 <- lme(EV.increase ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
                   data = P.data, weights = varIdent(form = ~1 | Size))
 lm.p.3 <- lme(EV.increase ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
@@ -721,32 +758,33 @@ lm.p.4 <- lme(EV.increase ~ Treatment*Species*Size, method = "ML", random = ~1 |
 # lm.p.3 shows best results for residuals, but AIC favours model without flexibility in heterogeneity..??
 AIC(lm.p.1, lm.p.2, lm.p.3, lm.p.4)
 
-# Generalized model
-# Set negative values to smallest positive value -1 
+# Try out LOG transformation of response variable
+# Set negative values to smallest positive value (1) to avoid log of negatives
 P.data$EV.increase[P.data$EV.increase <= 0] <- 1
-P.data$EV.LOG <- log10(P.data$EV.increase)
+
+# Distribution of LOG-transformed data
+ggplot(P.data, aes(x=log10(EV.increase))) + geom_histogram (bins = 12) + theme_bw()
 
 # try linear model on LOG transformed data
-lm.p.5  <- lme(EV.LOG ~ Species*Size*Treatment, random = ~1 | Structure, method = "ML", data = P.data)
-
-# Allowing for heterogeneity
-lm.p.6 <- lme(EV.LOG ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
+lm.p.5  <- lme(log10(EV.increase) ~ Species*Size*Treatment, random = ~1 | Structure, method = "ML", data = P.data)
+# Allowing for heterogeneity ( choices based on residual plots)
+lm.p.6 <- lme(log10(EV.increase) ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
                   data = P.data, weights = varIdent(form = ~1 | Size))
-lm.p.7 <- lme(EV.LOG ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
+lm.p.7 <- lme(log10(EV.increase) ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
                   data = P.data, weights = varIdent(form = ~1 | Size*Species))
 
-# lm.p.7 shows low AIC (comparable to lm.p.6), and shows best residuals
+# lm.p.7 shows low AIC and shows best residuals
 AIC(lm.p.5, lm.p.6, lm.p.7)
 
 anova(lm.p.7) # Three-way interaction not significant
 
 # Testing for least significant 2nd way interaction
-lm.p.8a <- lme(EV.LOG ~ Treatment*Species + Treatment*Size + Species*Size, method = "ML", random = ~1 | Structure, 
-              data = P.data, weights = varIdent(form = ~1 | Size*Species))
-lm.p.8b <- lme(EV.LOG ~ Treatment*Species + Species*Size + Treatment*Size, method = "ML", random = ~1 | Structure, 
-              data = P.data, weights = varIdent(form = ~1 | Size*Species))
-lm.p.8c <- lme(EV.LOG ~ Treatment*Size + Species*Size + Treatment*Species, method = "ML", random = ~1 | Structure, 
-              data = P.data, weights = varIdent(form = ~1 | Size*Species))
+lm.p.8a <- lme(log10(EV.increase) ~ Treatment*Species + Treatment*Size + Species*Size, method = "ML", 
+               random = ~1 | Structure, data = P.data, weights = varIdent(form = ~1 | Size*Species))
+lm.p.8b <- lme(log10(EV.increase) ~ Treatment*Species + Species*Size + Treatment*Size, method = "ML", 
+               random = ~1 | Structure, data = P.data, weights = varIdent(form = ~1 | Size*Species))
+lm.p.8c <- lme(log10(EV.increase) ~ Treatment*Size + Species*Size + Treatment*Species, method = "ML", 
+               random = ~1 | Structure, data = P.data, weights = varIdent(form = ~1 | Size*Species))
 
 # Treatment*Size least significant
 anova(lm.p.8a)
@@ -754,28 +792,28 @@ anova(lm.p.8b)
 anova(lm.p.8c)
 
 # Testing for least significant 2nd way interaction
-lm.p.9a <- lme(EV.LOG ~ Treatment*Species + Species*Size, method = "ML", random = ~1 | Structure, 
+lm.p.9a <- lme(log10(EV.increase) ~ Treatment*Species + Species*Size, method = "ML", random = ~1 | Structure, 
               data = P.data, weights = varIdent(form = ~1 | Size*Species))
-lm.p.9b <- lme(EV.LOG ~ Species*Size + Treatment*Species, method = "ML", random = ~1 | Structure, 
+lm.p.9b <- lme(log10(EV.increase) ~ Species*Size + Treatment*Species, method = "ML", random = ~1 | Structure, 
               data = P.data, weights = varIdent(form = ~1 | Size*Species))
 
 # Species*Treatment least significant
 anova(lm.p.9a)
 anova(lm.p.9b)
 
-lm.p.10 <- lme(EV.LOG ~ Species*Size + Treatment, method = "ML", random = ~1 | Structure, 
+lm.p.10 <- lme(log10(EV.increase) ~ Species*Size + Treatment, method = "ML", random = ~1 | Structure, 
               data = P.data, weights = varIdent(form = ~1 | Size*Species))
 
 # Treatment not significant
 anova(lm.p.10)
 
-lm.p.11 <- lme(EV.LOG ~ Species*Size, method = "ML", random = ~1 | Structure, 
+lm.p.11 <- lme(log10(EV.increase) ~ Species*Size, method = "ML", random = ~1 | Structure, 
               data = P.data, weights = varIdent(form = ~1 | Size*Species))
 
 # Species*Size interaction barely significant
 anova(lm.p.11)
 
-lm.p.12 <- lme(EV.LOG ~ Species+Size, method = "ML", random = ~1 | Structure, 
+lm.p.12 <- lme(log10(EV.increase) ~ Species+Size, method = "ML", random = ~1 | Structure, 
               data = P.data, weights = varIdent(form = ~1 | Size*Species))
 
 # All fixed factors highly significant: final model
@@ -793,7 +831,7 @@ mod <- lm.p.12
 op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2))
 plot(resid(mod, type = "pearson") ~ fitted(mod))
 abline(0,0)
-plot(P.data$EV.LOG, resid(mod, type = "pearson"))
+plot(log10(P.data$EV.increase), resid(mod, type = "pearson"))
 abline(0,0)
 hist(resid(mod, type = "pearson"), main = "")
 qqnorm(resid(mod, type = "pearson"))
@@ -803,7 +841,7 @@ plot(P.data$Species, resid(mod, type = "pearson"))
 abline(0,0)
 plot(P.data$Treatment, resid(mod, type = "pearson"))
 abline(0,0)
-plot(fitted(mod) ~ P.data$EV.LOG)
+plot(fitted(mod) ~ log10(P.data$EV.increase))
 par(op)
 
 ```
@@ -813,91 +851,113 @@ par(op)
 # Species plot
 # Get averages
 P.summary.Sp <- data_summary(P.data, varname = "EV.increase", groupnames = c("Species"))
-# Create ID and order dataframe by name of Finder
-P.summary.Sp <- tibble::rownames_to_column(P.summary.Sp, "ID")
-P.summary.Sp <- P.summary.Sp[order(P.summary.Sp$Species),]
 
-# Perform Tukey to get significance letters
-hsd.P.Sp = HSD.test(aov(EV.increase ~ Species, data = P.data), trt = c("Species"), group = T)
-sig.letters.P.Sp <- hsd.P.Sp$groups
+# Create ID and order dataframe by name of Finder
+P.summary.Sp <- P.summary.Sp[order(as.character(P.summary.Sp$Species)),]
+
+# Post hoc comparison
+hsd.P.Sp <- emmeans(lm.p.12, specs = pairwise ~ Species, adjust = "tukey", type = "response") 
+sig.letters.P.Sp <- multcomp::cld(hsd.P.Sp$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
+
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
-sig.letters.P.Sp <- tibble::rownames_to_column(sig.letters.P.Sp, "Group")
-sig.letters.P.Sp <- sig.letters.P.Sp[order(sig.letters.P.Sp$Group),]
+sig.letters.P.Sp <- sig.letters.P.Sp[order(as.character(sig.letters.P.Sp$Species)),]
+sig.letters.P.Sp <- sig.letters.P.Sp %>% mutate(.group = str_squish(.group)) # remove white spaces
 
 # Merge sig.letter dataframe into the summary dataframe
-P.summary.Sp <- cbind(P.summary.Sp, siglet = sig.letters.P.Sp$groups)
-P.summary.Sp <- P.summary.Sp[order(as.numeric(P.summary.Sp$ID)),]
+P.summary.Sp <- cbind(P.summary.Sp, siglet = sig.letters.P.Sp$.group)
+P.summary.Sp <- P.summary.Sp[order(as.character(P.summary.Sp$Species)),]
 
-# Plot 
+# Plot Species*Treatment bar graph + error bars + letters
 ggplot(P.summary.Sp, aes(x = Species, y = EV.increase))+
-  geom_bar(stat = "identity", position = position_dodge())+
-  labs(y = "Volume increase (%)")+
-  geom_errorbar(aes(ymin=EV.increase-(2*se), ymax=EV.increase+(2*se)), width=.2, position=position_dodge(.9))+
-  geom_text(data = P.summary.Sp, aes(x=Species, y = EV.increase + se*3, label = siglet), vjust=0,
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "EV increase (%)", x = "Species")+
+  geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2,
                 position=position_dodge(.9))+
-  theme_light()
+  geom_text(data = P.summary.Sp, aes(x=Species, y = EV.increase + se*1.3, label = siglet), vjust=0,
+                position=position_dodge(.9))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold.italic", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )+
+scale_x_discrete(labels= c("A. formosa", "A. verweyi", "P. verrucosa", "P. cylindrica"))
+ggsave("Production(LOG)_Species.png", width = 23, height = 10, units = "cm")
 
 # Size plot
 # Get averages
 P.summary.Si <- data_summary(P.data, varname = "EV.increase", groupnames = c("Size"))
-# Create ID and order dataframe
-P.summary.Si <- tibble::rownames_to_column(P.summary.Si, "ID")
+
+# Create ID and order dataframe by name of Finder
 P.summary.Si <- P.summary.Si[order(as.character(P.summary.Si$Size)),]
 
-# Perform Tukey to get significance letters
-hsd.P.Si = HSD.test(aov(EV.increase ~ Size, data = P.data), trt = c("Size"), group = T)
-sig.letters.P.Si <- hsd.P.Si$groups
+# Post hoc comparison
+hsd.P.Si <- emmeans(lm.p.12, specs = pairwise ~ Size, adjust = "tukey", type = "response") 
+sig.letters.P.Si <- multcomp::cld(hsd.P.Si$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
+
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
-sig.letters.P.Si <- tibble::rownames_to_column(sig.letters.P.Si, "Group")
-sig.letters.P.Si <- sig.letters.P.Si[order(sig.letters.P.Si$Group),]
+sig.letters.P.Si <- sig.letters.P.Si[order(as.character(sig.letters.P.Si$Size)),]
+sig.letters.P.Si <- sig.letters.P.Si %>% mutate(.group = str_squish(.group)) # remove white spaces
 
 # Merge sig.letter dataframe into the summary dataframe
-P.summary.Si <- cbind(P.summary.Si, siglet = sig.letters.P.Si$groups)
-P.summary.Si <- P.summary.Si[order(as.numeric(P.summary.Si$ID)),]
+P.summary.Si <- cbind(P.summary.Si, siglet = sig.letters.P.Si$.group)
+P.summary.Si <- P.summary.Si[order(as.character(P.summary.Si$Size)),]
 
-# Treatment plot 
+# Plot Species*Treatment bar graph + error bars + letters
 ggplot(P.summary.Si, aes(x = Size, y = EV.increase))+
-  geom_bar(stat = "identity", position = position_dodge())+
-  labs(y = "Volume increase (%)")+
-  geom_errorbar(aes(ymin=EV.increase-(2*se), ymax=EV.increase+(2*se)), width=.2, position=position_dodge(.9))+
-  geom_text(data = P.summary.Si, aes(x=Size, y = EV.increase + se*3, label = siglet), vjust=0,
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "EV increase (%)", x = "Species")+
+  geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2,
                 position=position_dodge(.9))+
-  theme_light()
+  geom_text(data = P.summary.Si, aes(x=Size, y = EV.increase + se*1.3, label = siglet), vjust=0,
+                position=position_dodge(.9))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    )+
+scale_x_discrete(labels= c("Small", "Medium", "Large"))
+ggsave("Production(LOG)_Size.png", width = 23, height = 10, units = "cm")
 
 # Treatment plot
 # Get averages
 P.summary.T <- data_summary(P.data, varname = "EV.increase", groupnames = c("Treatment"))
-# Create ID and order dataframe
-P.summary.T <- tibble::rownames_to_column(P.summary.T, "ID")
+
+# Create ID and order dataframe by name of Finder
 P.summary.T <- P.summary.T[order(as.character(P.summary.T$Treatment)),]
 
-# Perform Tukey to get significance letters
-hsd.P.T = HSD.test(aov(EV.increase ~ Treatment, data = P.data), trt = c("Treatment"), group = T)
-sig.letters.P.T <- hsd.P.T$groups
+# Post hoc comparison
+hsd.P.T <- emmeans(lm.p.10, specs = pairwise ~ Treatment, adjust = "tukey", type = "response") 
+sig.letters.P.T <- multcomp::cld(hsd.P.T$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
+
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
-sig.letters.P.T <- tibble::rownames_to_column(sig.letters.P.T, "Group")
-sig.letters.P.T <- sig.letters.P.T[order(sig.letters.P.T$Group),]
+sig.letters.P.T <- sig.letters.P.T[order(as.character(sig.letters.P.T$Treatment)),]
+sig.letters.P.T <- sig.letters.P.T %>% mutate(.group = str_squish(.group)) # remove white spaces
 
 # Merge sig.letter dataframe into the summary dataframe
-P.summary.T <- cbind(P.summary.T, siglet = sig.letters.P.T$groups)
-P.summary.T <- P.summary.T[order(as.numeric(P.summary.T$ID)),]
+P.summary.T <- cbind(P.summary.T, siglet = sig.letters.P.T$.group)
+P.summary.T <- P.summary.T[order(as.character(P.summary.T$Treatment)),]
 
-# Plot 
+# Plot Species*Treatment bar graph + error bars + letters
 ggplot(P.summary.T, aes(x = Treatment, y = EV.increase))+
-  geom_bar(stat = "identity", position = position_dodge())+
-  labs(y = expression(paste("Volume increase (% ", y^-1, ")")),
-       x = "Cleaning treatment")+
-  geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2, position=position_dodge(.9))+
-  geom_text(data = P.summary.T, aes(x=Treatment, y = EV.increase + se*1.15, label = siglet), vjust=0,
-                position=position_dodge(.9), size = 5)+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "EV increase (%)", x = "Treatment")+
+  geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2,
+                position=position_dodge(.9))+
+  geom_text(data = P.summary.T, aes(x=Treatment, y = EV.increase + se*1.3, label = siglet), vjust=0,
+                position=position_dodge(.9))+
   theme_economist()+scale_colour_economist()+
   theme(
     axis.title.x = element_text(color="black", vjust=-2, size = 12),
-    axis.text.x=element_text(size=12, face = "bold", vjust=0.5),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
     axis.title.y = element_text(color="black" , vjust=4, size = 12),
     axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
-    )
-ggsave("EVincrease_Treatment.png")
+    )+
+scale_x_discrete(labels= c("Weekly", "Monthly", "Quarterly", "Never"))
+ggsave("Production(LOG)_Treatment.png", width = 23, height = 10, units = "cm")
 
 ```
 
@@ -906,24 +966,27 @@ ggsave("EVincrease_Treatment.png")
 # Costs per treatment
 P.costs <- P.summary.T[,c(1,2,3)]
 
-# Calculate duration for each Treatment to reach 3900% increase
+# Calculate duration for each Treatment to reach 3900% increase (40x intial fragment size)
 P.costs <- P.costs %>% mutate(Days = log((3900 + 100)/100)/(log((EV.increase+100)/100)/365))
 
 # Calculate cleaning costs (number of times cleaning * costs)
 P.costs <- P.costs %>% mutate(Interval = c(7,30,91,365)) # Cleaning interval in days
-P.costs <- P.costs %>% mutate(Cleaning.visits = Days/Interval) # Number of cleaning visits
-P.costs$Cleaning.visits[P.costs$Treatment == "Never"] <- 0
+P.costs <- P.costs %>% mutate(Cleaning.visits = Days/Interval) # Number of cleaning visits per growth cycle (y)
+P.costs$Cleaning.visits[P.costs$Treatment == "Never"] <- 0 # No cleaning for Never cleaning Treatment
 P.costs <- P.costs %>% mutate(Trees.cleaned = c(5,4,3, 1)) # Trees cleaned in one visit (less when dirtier)
 
-dive.cost <- 15 # 15 EUR per dive per diver: 1 diver can between 3 - 5 trees, depending on Treatment (how dirty)
-initial.cost <- 20 # 20 EUR for construction costs, deployment & filling tree with fragments
+# 20 EUR for construction costs (materials + wage (8h)) divided by life span (5 cycles = 5 years) + deployment diving + wages (8h construction, 2*2h deployment)
+dive.cost <- 15 # 15 EUR per dive per diver
+material.cost <- 17.42 # Cement, PVC, loops etc
+hour.wage <- 0.54 # 500 ksh for a 7h day
+initial.cost <- material.cost/5 + hour.wage*8/5 + dive.cost*2/3 + hour.wage * 4
 
-P.costs <- P.costs %>% mutate(Costs = Cleaning.visits * (dive.cost/Trees.cleaned) + initial.cost)
-P.costs <- P.costs %>% mutate(Costs.fragment = Costs/60)
+P.costs <- P.costs %>% 
+  mutate(Costs = Cleaning.visits*(dive.cost/Trees.cleaned) + Cleaning.visits*(hour.wage*2/Trees.cleaned) + initial.cost)
+P.costs <- P.costs %>% mutate(Costs.fragment = Costs/60) # Per fragment (60 frags in 1 tree)
 
 # Plot
-scaleFUN <- function(x) sprintf("%.2f", x)
-
+scaleFUN <- function(x) sprintf("%.2f", x) # Get two decimals on y-axis
 ggplot(P.costs, aes(x = Treatment, y = Costs.fragment))+
   geom_bar(stat = "identity", position = position_dodge())+
   labs(y = "Cost per fragment (EUR)",
@@ -936,7 +999,7 @@ ggplot(P.costs, aes(x = Treatment, y = Costs.fragment))+
     axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
     )+ 
   scale_y_continuous(labels=scaleFUN)+
-  geom_text(aes(label = paste("€",  round(Costs.fragment, 2))), vjust = 1.5, size = 5, color="white")
+  geom_text(aes(label = paste("€",  round(Costs.fragment, 2))), vjust = 1.45, size = 5, color="white")
 ggsave("Cost per fragment.png")
 
 ```
