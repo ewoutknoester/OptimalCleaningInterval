@@ -7,20 +7,21 @@ output: html_document
 
 # Setup
 ```{r setup, include=FALSE}
+
 rm(list=ls()) # Clear workspace
 knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
 
+library(betareg) # Beta regression
+library(car) # ANOVA results GLM
+library(cowplot) # Combine plots
+library(emmeans) # Pairwise comparisons
+library(ggthemes) # Pretty plots
+library(NCmisc) # Check packages used
+library(nlme) # GLS
+library(panelr) # Convert data from wide to long
 library(readxl) # Import excel sheets
 library(tidyverse) # Tidy data
-library(panelr) # Convert data from wide to long
-library(nlme) # GLS
-library(emmeans) # Pairwise comparisons
-library(betareg) # Beta regression
-library(ggthemes) # Pretty plots
-library(car) # ANOVA results GLM
-library(NCmisc) # Check packages used
 library(writexl)
-library(cowplot) # Combine plots
 
 # Function to facilitate averaging datasets
 data_summary <- function(data, varname, groupnames){
@@ -33,9 +34,10 @@ data_summary <- function(data, varname, groupnames){
   }
   data_sum<-ddply(data, groupnames, .fun=summary_func,
                   varname)
-  data_sum <- rename(data_sum, c("mean" = varname))
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
  return(data_sum)
 }
+
 ```
 
 # Data selection (preparing dataset for archiving & sharing)
@@ -149,17 +151,19 @@ clean.data$Date <- ordered(clean.data$Date, c("10/2018", "12/2018", "02/2019", "
                                               "10/2019", "Average"))
 
 # Remove rows with Exclude: influenced by factors of non-interest (e.g. corallivory, wrong start size/health)
+## Inspect data
+exclude <- subset(clean.data, Cause_death == "Exclude")
+exclude.num <- unique(exclude$id)
+summary(exclude)
+## Subset
 clean.data.1 <- clean.data[-which(clean.data$Cause_death == "Exclude"),]
 
 # Create subset to inspect missing values
 missing <- subset(clean.data.1, Cause_death == "Missing")
+## Ispect: Indicating that missing fragments are roughly equally distributed across Treatments
 missing <- subset(missing, Date == "10/2019")
-
-## Summary of missing values 
-### Indicating that missing fragments are roughly equally distributed across Treatments
 summary(missing)
-
-#! Decision to leave out missing fragments from analysis as pattern is not related to Treatment
+##! Decision to leave out missing fragments from analysis as pattern is not related to Treatment
 clean.data.1 <- clean.data.1[-which(clean.data.1$Cause_death == "Missing"),]
 clean.data.1 <- clean.data.1[clean.data.1$id != "597", ] # Remove observation without start values
 
@@ -180,16 +184,17 @@ sgr.data.summary <- data_summary(sgr.data, varname = "SGR", groupnames = c("Spec
 ggplot(sgr.data.summary, aes(x = Date, fill = Size, y = SGR))+
   geom_bar(stat = "identity", position = position_dodge(), na.rm = TRUE)+
   labs(y = expression(paste("SGR (", d^-1,")")))+
-  scale_y_continuous(expand=c(0, 0), limits=c(-0.005, 0.025))+
-  facet_grid(cols=vars(Treatment))+
-  facet_wrap(~Species + Treatment, nrow = 4)+
+  scale_y_continuous(expand=c(0, 0), limits=c(-0.004, 0.024))+
+  facet_grid(Species ~ Treatment)+
   geom_errorbar(aes(ymin=SGR-(1*se), ymax=SGR+(1*se)), width=.2,
                 position=position_dodge(.9))+
   scale_fill_manual(values=c("#adadad", "#7A7A7A", "#303030"))+
   theme_light()+
   theme(
-    axis.text.x = element_text(size=12, angle = 90, vjust = 0.5, hjust=1)
-  )
+    legend.position="top",
+    strip.text.y = element_text(size = 10, face = "italic"),
+    axis.text.x = element_text(size=11, angle = 90, vjust = 0.5, hjust=1),
+    axis.text.y = element_text(size=10))
 ggsave("All_SGR.tiff", width = 18, height = 24, units = "cm", dpi=1200, compression = "lzw")
 
 ## Simplify data by taking average SGR: ignore effect of time (bleaching event/seasons)
@@ -239,6 +244,7 @@ plot(sgr.data$Size, resid(mod, type = "pearson")) # residuals split over Treatme
 abline(0,0)
 plot(fitted(mod) ~ sgr.data$SGR) # response data vs fitted
 par(op)
+
 
 ```
 ## Post hoc and plots
@@ -425,17 +431,18 @@ surv.data.summary <- subset(surv.data.summary, Date != "Average")
 
 ggplot(surv.data.summary, aes(x = Date, fill = Size, y = Condition))+
   geom_bar(stat = "identity", position = position_dodge(), na.rm = TRUE)+
-  labs(y = "Live tissue (%)")+
+  labs(y = "Live coral tissue (%)")+
   scale_y_continuous(expand=c(0, 0), limits=c(0, 100))+
-  facet_grid(cols=vars(Treatment))+
-  facet_wrap(~Species + Treatment, nrow = 4)+
+  facet_grid(Species ~ Treatment)+
   geom_errorbar(aes(ymin=Condition-(1*se), ymax=Condition+(1*se)), width=.2,
                 position=position_dodge(.9))+
   scale_fill_manual(values=c("#adadad", "#7A7A7A", "#303030"))+
   theme_light()+
   theme(
-    axis.text.x = element_text(size=12, angle = 90, vjust = 0.5, hjust=1)
-  )
+    legend.position="top",
+    strip.text.y = element_text(size = 10, face = "italic"),
+    axis.text.x = element_text(size=11, angle = 90, vjust = 0.5, hjust=1),
+    axis.text.y = element_text(size=10))
 ggsave("All_Survival.tiff", width = 18, height = 24, units = "cm", dpi=1200, compression = "lzw")
 
 # Select survival at end of experiment only (ignore effect of time)
@@ -538,7 +545,7 @@ names(spec.labs) <- c("Acropora cf muricata", "Acropora verweyi", "Pocillopora v
 # Plot Species*Size*Treatment bar graph + error bars + letters
 ggplot(surv.summary.SST, aes(x = Size, fill = Treatment, y = Condition))+
   geom_bar(stat = "identity", position = position_dodge())+ 
-  labs(y = "Live tissue (%)", x = "Size")+ facet_grid(rows=vars(Species), labeller = labeller(Species = spec.labs)) +
+  labs(y = "Live coral tissue (%)", x = "Size")+ facet_grid(rows=vars(Species), labeller = labeller(Species = spec.labs)) +
   geom_errorbar(aes(ymin=Condition-(1*se), ymax=Condition+(1*se)), width=.2,
                 position=position_dodge(.9))+
   geom_text(data = surv.summary.SST, aes(x=Size, y = Condition + se+4, label = siglet), vjust=0,
@@ -584,7 +591,7 @@ surv.summary.TSp <- surv.summary.TSp[order(as.numeric(surv.summary.TSp$ID)),]
 # Plot Species*Treatment bar graph + error bars + letters
 Survival_TreatmentxSpecies <- ggplot(surv.summary.TSp, aes(x = Species, fill = Treatment, y = Condition))+
   geom_bar(stat = "identity", position = position_dodge())+ 
-  labs(y = "Live tissue (%)", x = "Species")+
+  labs(y = "Live coral tissue (%)", x = "Species")+
   geom_errorbar(aes(ymin=Condition-(1*se), ymax=Condition+(1*se)), width=.2,
                 position=position_dodge(.9))+
   geom_text(data = surv.summary.TSp, aes(x=Species, y = Condition + se+4, label = siglet), vjust=0,
@@ -631,7 +638,7 @@ surv.summary.TSi <- surv.summary.TSi[order(as.numeric(surv.summary.TSi$ID)),]
 # Plot Species*Treatment bar graph + error bars + letters
 Survival_TreatmentxSize <- ggplot(surv.summary.TSi, aes(x = Size, fill = Treatment, y = Condition))+
   geom_bar(stat = "identity", position = position_dodge())+ 
-  labs(y = "Live tissue (%)", x = "Size")+
+  labs(y = "Live coral tissue (%)", x = "Size")+
   geom_errorbar(aes(ymin=Condition-(1*se), ymax=Condition+(1*se)), width=.2,
                 position=position_dodge(.9))+
   geom_text(data = surv.summary.TSi, aes(x=Size, y = Condition + se+4, label = siglet), vjust=0,
@@ -678,7 +685,7 @@ surv.summary.SS <- surv.summary.SS[order(as.numeric(surv.summary.SS$ID)),]
 # Plot Species x Size
 Survival_SpeciesxSize <- ggplot(surv.summary.SS, aes(x = Species, fill = Size, y = Condition))+
   geom_bar(stat = "identity", position = position_dodge())+ 
-  labs(y = "Live tissue (%)", x = "Size")+
+  labs(y = "Live coral tissue (%)", x = "Size")+
   geom_errorbar(aes(ymin=Condition-(1*se), ymax=Condition+(1*se)), width=.2,
                 position=position_dodge(.9))+
   geom_text(data = surv.summary.SS, aes(x=Species, y = Condition + se+4, label = siglet), vjust=0,
@@ -786,7 +793,7 @@ lm.p.11 <- lme(sqrt(EV.increase) ~ Treatment*Species*Size, method = "ML", random
 AIC(lm.p.5, lm.p.6, lm.p.7, lm.p.8, lm.p.9, lm.p.10, lm.p.11)
 
 # Model selection
-anova(lm.p.11) # Three-way interaction not significant, but Species*Size is
+Anova(lm.p.11) # Three-way interaction not significant, but Species*Size is
 
 ```
 ## Model validation
@@ -994,6 +1001,8 @@ scale_x_discrete(labels= c("Weekly", "Monthly", "Quarterly", "Never"))
 
 # Costs per treatment
 P.costs <- P.summary.TS[,c(1,3,4,5)]
+# Match EV.increase as multiplication factor (as used in costs calculations): i.e. 100% is no change (x1)
+P.costs$EV.increase <- P.costs$EV.increase + 100
 
 # Calculate duration for each Treatment to reach 4000% increase (40x initial fragment size)
 ## Using average values across the three Sizes
@@ -1001,42 +1010,53 @@ P.costs <- P.summary.TS[,c(1,3,4,5)]
 ## t_needed = LN(EV_end/EV_start)/(LN(EV_t/EV_0)/t_nursery
 ## Where EV_t and EV_0 are realized start and end volumes per treatment, and EV_start and EV_end are the desired start and end volumes for which the nursery duration will be calculated, t_needed is days needed for fragment to reach desired end volume and t_nursery is days actual fragments were in the nursery (365)
 ## All volumes are expressed as multiplication factor in percentages, eg EV increase of 100% means fragments remained same size and EV increase of 200% means the volume doubled
-P.costs <- P.costs %>% mutate(Days = log((4000)/100)/(log((EV.increase)/100)/365))
+
+# Add days needed to reach target volume based on EV.increase
+P.costs <- P.costs %>% mutate(Days = log(1600/100)/(log((EV.increase)/100)/365))
 
 # Calculate cleaning costs (number of times cleaning * costs)
+## Set cleaning interval
 P.costs$Interval <- ifelse(P.costs$Treatment == "Weekly", 7,
                     ifelse(P.costs$Treatment == "Monthly", 30,
                     ifelse(P.costs$Treatment == "Quarterly", 91,  
                     ifelse(P.costs$Treatment == "Never", 0, 999 ))))
-P.costs <- P.costs %>% mutate(Cleaning.visits = Days/Interval) # Number of cleaning visits per growth cycle (y)
+## Calculate number of cleaning visits needed per growth cycle (y)
+P.costs <- P.costs %>% mutate(Cleaning.visits = Days/Interval) 
 P.costs$Cleaning.visits[P.costs$Treatment == "Never"] <- 0 # No cleaning for Never cleaning Treatment
-P.costs <- P.costs %>% mutate(Trees.cleaned = c(5,4,3, 1)) # Trees cleaned in one visit (less when dirtier)
+# Specify number of trees cleaned in one visit by a buddy pair (i.e. less trees are cleaned when they are dirtier)
+P.costs <- P.costs %>% plyr::mutate(Trees.cleaned = c(5, 4, 3, 1)) 
 
-# 20 EUR for construction costs (materials + wage (8h)) divided by life span (5 cycles = 5 years) + deployment diving + wages (8h construction per tree, 2 divers * 3.5 h deployment for 3 trees)
-dive.cost <- 20 # 15 EUR per dive per diver
-material.cost <- 18.93 # Cement, PVC, loops etc
-hour.wage <- 0.60 # 500 ksh for a 7h day
-initial.cost.structure <- (material.cost/5) + ((hour.wage*8)/5) 
-initial.costs.deployment <- ((dive.cost*2)/3) + ((hour.wage * 3.5 * 2) / 3)
+## Define costs for tree construction and deployment
+## Construction costs (materials + wage (8h to make 1 tree)) divided by life span (5 cycles = 5 years) + deployment diving + wages (2 divers * 3.5 h deployment for 3 trees)
+dive.cost <- 16 # USD: 15 EUR per dive per diver
+material.cost <- 17.05 # USD: Cement, PVC, loops etc (see Masterplan Excel), in 2019 USD
+hour.wage <- 0.46 # USD: 500 ksh for a 8h day
+initial.cost.structure <- material.cost + hour.wage*8 # Divide by 5, assuming a structure will last 5 cycles
+initial.costs.deployment <- (dive.cost*2 + hour.wage*2*2)/3 # Divided by 3, as values were for 3 trees
 
+## Calculate cleaning costs based on cleaning visits, dive costs and wages
+cleaning.costs <- (dive.cost*2 + hour.wage*2*2)/6
 P.costs <- P.costs %>% 
-  mutate(Costs_1 = Cleaning.visits*(dive.cost/Trees.cleaned) + Cleaning.visits*(hour.wage*2/Trees.cleaned))
-P.costs$Costs_structure <- (initial.cost.structure * P.costs$Days)/ (365*5)
-P.costs$Costs_deployment <- initial.costs.deployment
+  mutate(Costs_1 = Cleaning.visits*cleaning.costs)
+## Adjust structure costs depending on how many cycles will fit during 1 structure lifetime (5 years)
+P.costs$Costs_structure <- (initial.cost.structure * P.costs$Days)/(5*365) # Assuming structure lasts for 5 years
+P.costs$Costs_deployment <- initial.costs.deployment # Deployment costs are always incurred so remain stable
 
+## Total the costs for cleaning, materials & deployment per structure
 P.costs <- add_column(P.costs, Costs_tot = P.costs$Costs_1 + P.costs$Costs_structure + P.costs$Costs_deployment, .after = 2)
+## Isolate the costs needed for each nursery round
 P.costs$Costs_2 <- P.costs$Costs_structure + P.costs$Costs_deployment
 P.costs <- select(P.costs, -c("Costs_structure", "Costs_deployment"))
 
+# Get into long format
 P.costs <- as.data.frame(long_panel(P.costs, prefix = "_", begin = 1, end = 2, label_location = "end"))
 colnames(P.costs)[which(names(P.costs) == "wave")] <- "Cost type"
-P.costs$`Cost type` <- ifelse(P.costs$`Cost type` == 1, "Cleaning", "Maintenance")
+P.costs$`Cost type` <- ifelse(P.costs$`Cost type` == 1, "Cleaning", "Setup")
 P.costs$Costs_tot <- as.numeric(ifelse(P.costs$`Cost type` == "Cleaning", P.costs$Costs_tot, ""))
 
 # Calculate per fragment (60 fragments in 1 tree)
 P.costs <- P.costs %>% mutate(Costs.fragment = Costs/60) 
 P.costs <- P.costs %>% mutate(Costs_tot = Costs_tot/60)
-
 
 # Plot
 scaleFUN <- function(x) sprintf("%.2f", x) # Get two decimals on y-axis
@@ -1044,7 +1064,7 @@ scaleFUN <- function(x) sprintf("%.2f", x) # Get two decimals on y-axis
 ggplot(P.costs, aes(x = Treatment, y = Costs.fragment, fill = `Cost type`))+
   geom_bar(position = "stack", stat="identity")+
   facet_wrap(~Species, nrow = 4, strip.position = "right")+
-  labs(y = "Cost per fragment (EUR)",
+  labs(y = "Cost per fragment (2019 USD)",
        x = "Cleaning treatment")+
   scale_y_continuous(limits=c(0, 7), labels=scaleFUN)+
   theme_economist()+scale_colour_economist()+
@@ -1056,7 +1076,7 @@ ggplot(P.costs, aes(x = Treatment, y = Costs.fragment, fill = `Cost type`))+
     axis.text.y=element_text(size=11, vjust=0.5),
     strip.text.y = element_text(size = 12, face = "bold.italic")
     )+ 
-  geom_text(aes(label = ifelse(is.na(Costs_tot), "", paste("€",  round(Costs_tot, 2)))), vjust = -1.2, size = 5, color="black", fontface = "bold")
+  geom_text(aes(label = ifelse(is.na(Costs_tot), "", paste0("$",  format(round(Costs_tot, digits = 2), nsmall = 2)))), vjust = -1.2, size = 5, color="black", fontface = "bold")
 ggsave("Cost per fragment.tiff", width = 18, height = 23, units = "cm", dpi=1200, compression = "lzw")
 
 ```
