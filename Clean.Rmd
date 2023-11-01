@@ -19,9 +19,9 @@ library(ggthemes) # Pretty plots
 library(NCmisc) # Check packages used
 library(nlme) # GLS
 library(panelr) # Convert data from wide to long
-library(readxl) # Import excel sheets
+library(readxl) # Import Excel
 library(tidyverse) # Tidy data
-library(writexl)
+library(writexl) # Export Excel
 
 # Function to facilitate averaging datasets
 data_summary <- function(data, varname, groupnames){
@@ -47,7 +47,7 @@ data_summary <- function(data, varname, groupnames){
 raw.data <- read_excel("Raw data/cleaning_exp.xlsx", sheet = "RAW DATA") 
   
 # Insert new columns Treatment & Size
-raw.data.1 <- as.data.frame(append(raw.data,list(Treatment = "",Size = ""), after = 7))
+raw.data.1 <- as.data.frame(append(raw.data,list(Treatment = "", Size = ""), after = 7))
 
 ## Fill Size with conditional values from Length: ie make start length a categorical variable (small, medium, large)
 raw.data.1$Size <- ifelse(raw.data.1$Length.S1 < 3.4, "Small",
@@ -59,23 +59,23 @@ raw.data.1$Treatment <- ifelse(raw.data.1$Structure %in% c("Tree 095", "Tree 089
                         ifelse(raw.data.1$Structure %in% c("Tree 099", "Tree 098", "Tree 094"), "Quarterly",
                                                                                                 "Never")))
 
-# Insert new columns to calculate average SGR over whole 1-year period while maintaining same wide-format style data
+# Insert new columns to calculate average SGR over whole 1-year period while maintaining  wide-format
 raw.data.1 <- as.data.frame(append(raw.data.1, list(Date.S8 = "2019-12-24", Length.S8 = NA,
               Width1.S8 = NA, Width2.S8 = NA, EV.S8 = NA, Condition.S8 = NA, Cause_death.S8 = NA, s_g_r.S8 = NA, 
               Comments.S8 = NA), after = 73))
 
-## Calculate SGR (Specific Growth Rate) over whole period
+## Calculate SGR (Specific Growth Rate) over whole study period
 raw.data.1$s_g_r.S8 <- log(raw.data.1$EV.S7/raw.data.1$EV.S1)/as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
                        format="%Y-%m-%d") - as.Date(as.character(raw.data.1$Date.S1), format="%Y-%m-%d"))
 
 ## Calculate increase in EV as percentage over whole period (NB: expressed as percentage per year, as opposed to other EV values): value of 100% meaning it doubled in size 
-raw.data.1$EV.S8 <- ((raw.data.1$EV.S7 - raw.data.1$EV.S1)/raw.data.1$EV.S1)*100
+#raw.data.1$EV.S8 <- ((raw.data.1$EV.S7 - raw.data.1$EV.S1)/raw.data.1$EV.S1)*100
 
 ### Standardize percentage increase in volume to one year (experiment duration was slightly longer than a year)
-raw.data.1$EV.S8 <- 100*exp((log((raw.data.1$EV.S8+100)/100)/(as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
-    format="%Y-%m-%d") - as.Date(as.character(raw.data.1$Date.S1), format="%Y-%m-%d"))))*365)-100
+#raw.data.1$EV.S8 <- 100*exp((log((raw.data.1$EV.S8+100)/100)/(as.numeric(as.Date(as.character(raw.data.1$Date.S7), 
+#    format="%Y-%m-%d") - as.Date(as.character(raw.data.1$Date.S1), format="%Y-%m-%d"))))*365)-100
 
-## Fill in end Condition for Average time factor (NB: end Condition will be used in analysis)
+## Fill in end Condition for Average time (NB: end Condition will be used in analysis)
 raw.data.1$Condition.S8 <- raw.data.1$Condition.S7
 raw.data.1$Cause_death.S8 <- raw.data.1$Cause_death.S7
 
@@ -96,7 +96,7 @@ raw.data.2 %<>%
   mutate(Species = Species %>% 
            factor(levels = species.order) %>% 
            fct_recode('Pocillopora verrucosa' = "Pocillopora verucosa",
-                      'Acropora cf muricata' = "Acropora formosa"))
+                      'Acropora cf. muricata' = "Acropora formosa"))
 
 ## Read in NAs properly
 raw.data.2$SGR[raw.data.2$SGR == "NA"] <- NA
@@ -122,7 +122,7 @@ raw.data.2 %<>%
 # Drop and reorder some columns
 clean.data <- raw.data.2 %>%
   select(c("id", "Position", "Structure", "Species", "Treatment", "Size", 
-           "Date", "Length", "Cause_death", "Condition", "SGR", "EV")) 
+           "Date", "Length", "Cause_death", "Comments", "Condition", "SGR", "EV")) 
 
 # Tidy formatting data frame
 clean.data$Length <- round(clean.data$Length, 1)
@@ -132,15 +132,18 @@ clean.data$SGR <- round(clean.data$SGR, 3)
 # Export data selection
 write_xlsx(clean.data, "Cleaning experiment.xlsx")
 
+# Clear cache
+rm(raw.data, raw.data.1, raw.data.2)
+
 ```
 
 # Data cleaning
 ```{r data cleaning}
 
-# Import excel sheet
+# Import clean excel sheet
 clean.data <- read_excel("Cleaning experiment.xlsx", sheet = 1)
 
-# Set correct data types
+# Set correct data formats
 clean.data$Structure <- factor(clean.data$Structure)
 clean.data$Size <- ordered(clean.data$Size, levels = c("Small", "Medium", "Large"))
 clean.data$Treatment <- ordered(clean.data$Treatment, c("Weekly", "Monthly", "Quarterly", "Never"))
@@ -150,19 +153,23 @@ clean.data$Cause_death <- factor(clean.data$Cause_death)
 clean.data$Date <- ordered(clean.data$Date, c("10/2018", "12/2018", "02/2019", "04/2019", "06/2019", "08/2019",
                                               "10/2019", "Average"))
 
-# Remove rows with Exclude: influenced by factors of non-interest (e.g. corallivory, wrong start size/health)
+# Remove rows with 'Exclude': fragments with unhealthy start or wrong size (too small or too big)
 ## Inspect data
 exclude <- subset(clean.data, Cause_death == "Exclude")
-exclude.num <- unique(exclude$id)
+exclude.num <- unique(exclude$id) # Affecting 10 coral fragments in total, over multiple dates
 summary(exclude)
+rm(exclude)
 ## Subset
 clean.data.1 <- clean.data[-which(clean.data$Cause_death == "Exclude"),]
 
+#! NB: Coral fragments with predation marks (17 fragments in total) kept in the database
+
 # Create subset to inspect missing values
 missing <- subset(clean.data.1, Cause_death == "Missing")
-## Ispect: Indicating that missing fragments are roughly equally distributed across Treatments
 missing <- subset(missing, Date == "10/2019")
 summary(missing)
+rm(missing)
+## Inspect: Indicating that missing fragments are roughly equally distributed across Treatments
 ##! Decision to leave out missing fragments from analysis as pattern is not related to Treatment
 clean.data.1 <- clean.data.1[-which(clean.data.1$Cause_death == "Missing"),]
 clean.data.1 <- clean.data.1[clean.data.1$id != "597", ] # Remove observation without start values
@@ -171,12 +178,12 @@ clean.data.1 <- clean.data.1[clean.data.1$id != "597", ] # Remove observation wi
 
 # SGR analysis
 ## Model selection
-```{r SGR: linear model selection}
+```{r SGR model}
 
 # DATA PREP
 ## Create subset for SGR where Condition > 80: only healthy corals will be used to determine SGR
 sgr.data <- subset(clean.data.1, Condition >= 80 | is.na(Condition))
-sgr.data <- subset(sgr.data, !(is.na(SGR))) # Exclude SGR with NA
+sgr.data <- subset(sgr.data, !(is.na(SGR))) # Exclude SGR with NA (either because of start date or merged fragments)
 
 ## Visualize time effect
 sgr.data.summary <- data_summary(sgr.data, varname = "SGR", groupnames = c("Species", "Size", "Treatment", "Date"))
@@ -194,10 +201,11 @@ ggplot(sgr.data.summary, aes(x = Date, fill = Size, y = SGR))+
     legend.position="top",
     strip.text.y = element_text(size = 10, face = "italic"),
     axis.text.x = element_text(size=11, angle = 90, vjust = 0.5, hjust=1),
-    axis.text.y = element_text(size=10))
+    axis.text.y = element_text(size=10))+
+    guides(fill=guide_legend(title="Size:"))
 ggsave("All_SGR.tiff", width = 18, height = 24, units = "cm", dpi=1200, compression = "lzw")
 
-## Simplify data by taking average SGR: ignore effect of time (bleaching event/seasons)
+## Simplify data set by taking average SGR: ignore effect of time for analysis (bleaching event/seasons)
 sgr.data <- subset(sgr.data, Date == "Average")
 
 ## Exclude columns not used
@@ -209,26 +217,26 @@ sgr.summary <- data_summary(sgr.data, varname = "SGR", groupnames = c("Species",
 
 # MODEL
 ## Random factor to account for non-independence of multiple coral fragments in same nursery Structure
-### Full model without random factor
-lme.sgr.0r  <- gls(SGR ~ Treatment*Species*Size, method = "REML", na.action = na.omit,
-                  data = sgr.data) # AIC = -3369
-
-### Full model with random factor
-lme.sgr.1r  <- lme(SGR ~ Treatment*Species*Size, method = "REML", na.action = na.omit, random = ~1 | Structure, 
-                  data = sgr.data) # AIC = -3378
-
-AIC(lme.sgr.0r, lme.sgr.1r) # Tree as random factor improves model substantially and accounts for pseudo-replication
+lme.sgr.1r  <- lme(SGR ~ Treatment*Species*Size, random = ~1 | Structure, data = sgr.data) 
 
 ## Allowing for heterogeneity among Species (showed best residuals of all Species * Size * Treatment combis)
-lme.sgr.1r.S  <- lme(SGR ~ Treatment*Species*Size, method = "ML", na.action = na.omit, random = ~1 | Structure, 
+lme.sgr.1r.S  <- lme(SGR ~ Treatment*Species*Size, random = ~1 | Structure, 
                   data = sgr.data, weights = varIdent(form = ~1 | Species))
 
 ## Model output
 Anova(lme.sgr.1r.S) # Three-way interaction not significant, but all three 2-way interactions are
 
+## Check for main effects (not plotted below)
+### Species
+hsd.S <- emmeans(lme.sgr.1r.S, specs = pairwise ~ Species, adjust = "tukey")
+multcomp::cld(hsd.S$emmeans, reversed = TRUE, alpha = 0.05, Letters = letters) # get CLD
+### Size
+hsd.Si <- emmeans(lme.sgr.1r.S, specs = pairwise ~ Size, adjust = "tukey")
+multcomp::cld(hsd.Si$emmeans, reversed = TRUE, alpha = 0.05, Letters = letters) # get CLD
+
 ```
 ## Model validation
-```{r SGR model validation}
+```{r SGR validation}
 
 mod <- lme.sgr.1r.S # set model to be validated
 op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
@@ -248,9 +256,9 @@ par(op)
 
 ```
 ## Post hoc and plots
-```{r SGR plot}
+```{r SGR plots}
 
-# Size*Species plot
+# ----- Size*Species plot -----
 # Get averages
 sgr.summary.SS <- data_summary(sgr.data, varname = "SGR", groupnames = c("Species", "Size"))
 # Create unique Finder for each Species*Size combination
@@ -291,10 +299,11 @@ SGR_SpeciesxSize<- ggplot(sgr.summary.SS, aes(x = Species, fill = Size, y = SGR)
     axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
     axis.ticks.length.x = unit(c(0,2), "mm")
     )+
-scale_x_discrete(labels= c("A. cf muricata", "A. verweyi", "P. verrucosa", "P. cylindrica"))
+scale_x_discrete(labels= c("A. cf. muricata", "A. verweyi", "P. verrucosa", "P. cylindrica"))+
+    guides(fill=guide_legend(title="Size:"))
 #ggsave("SGR_Species x Size.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Treatment*Species plot
+# ----- Treatment*Species plot -----
 # Get averages
 sgr.summary.TS <- data_summary(sgr.data, varname = "SGR", groupnames = c("Treatment", "Species"))
 # Create unique Finder for each Treatment*Species combination
@@ -308,7 +317,7 @@ sgr.summary.TS <- sgr.summary.TS[order(as.character(sgr.summary.TS$Finder)),]
 hsd.TS <- emmeans(lme.sgr.1r.S, specs = pairwise ~ Treatment|Species, adjust = "tukey")
 letters.TS <- multcomp::cld(hsd.TS$emmeans, decreasing = TRUE, alpha = 0.05, Letters = letters) # get CLD
 
-# Create ID and order dataframe by name (equals Finder of sgr.summary.SS dataframe)
+# Create ID and order dataframe by name
 letters.TS <- as.data.frame(append(letters.TS,
     list(Finder = paste(letters.TS$Treatment, letters.TS$Species, sep=":")), after = 0))
 letters.TS <- letters.TS[order(letters.TS$Finder),]
@@ -335,10 +344,11 @@ SGR_TreatmentxSpecies <- ggplot(sgr.summary.TS, aes(x = Species, fill = Treatmen
     axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
     axis.ticks.length.x = unit(c(0,2), "mm")
     )+
-scale_x_discrete(labels= c("A. cf muricata", "A. verweyi", "P. verrucosa", "P. cylindrica"))
+scale_x_discrete(labels= c("A. cf. muricata", "A. verweyi", "P. verrucosa", "P. cylindrica"))+
+    guides(fill=guide_legend(title="Cleaning frequency:"))
 #ggsave("SGR_Treatment x Species.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Treatment*Size plot
+# ----- Treatment*Size plot -----
 # Get averages
 sgr.summary.TSi <- data_summary(sgr.data, varname = "SGR", groupnames = c("Treatment", "Size"))
 # Create unique Finder for each Treatment*Size combination
@@ -379,10 +389,11 @@ SGR_TreatmentxSize <- ggplot(sgr.summary.TSi, aes(x = Size, fill = Treatment, y 
     axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
     axis.ticks.length.x = unit(c(0,2), "mm")
     )+
-scale_x_discrete(labels= c("Small", "Medium", "Large"))
+scale_x_discrete(labels= c("Small", "Medium", "Large"))+
+guides(fill=guide_legend(title="Cleaning frequency:"))
 #ggsave("SGR_Treatment x Size.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Treatment plot
+# ----- Treatment plot -----
 # Get averages
 sgr.summary.T <- data_summary(sgr.data, varname = "SGR", groupnames = c("Treatment"))
 # Create ID and order dataframe
@@ -418,9 +429,9 @@ ggplot(sgr.summary.T, aes(x = Treatment, y = SGR))+
 
 ```
 
-# Survival analysis
+# CONDITION analysis
 ## Data preparations
-```{r data preparations}
+```{r condition data prep}
 
 # Create survival dataframe
 surv.data <- clean.data.1
@@ -442,10 +453,11 @@ ggplot(surv.data.summary, aes(x = Date, fill = Size, y = Condition))+
     legend.position="top",
     strip.text.y = element_text(size = 10, face = "italic"),
     axis.text.x = element_text(size=11, angle = 90, vjust = 0.5, hjust=1),
-    axis.text.y = element_text(size=10))
+    axis.text.y = element_text(size=10))+
+    guides(fill=guide_legend(title="Size:"))
 ggsave("All_Survival.tiff", width = 18, height = 24, units = "cm", dpi=1200, compression = "lzw")
 
-# Select survival at end of experiment only (ignore effect of time)
+# Select survival at end of experiment only (ignore effect of time for subsequent analysis)
 surv.data <- subset(surv.data, Date == "Average")
 
 # Exclude columns not used
@@ -457,14 +469,10 @@ surv.avg <- data_summary(surv.data, varname = "Condition", groupnames = c("Speci
 surv.avg <- surv.avg %>% select(-c("sd", "se"))
 
 ```
-## Model selection
-<!--  
+## Model - Condition
+```{r condition model}
 ### Linear models (lm) couldn't be used: no data transformation could deal with this type of data
-### Beta regression using full data set didn't work (hopeless residuals), so using data averaged over structures  
--->
-
-### Averaged beta selection
-```{r AVG survival: betareg model selection}
+### Beta regression using full data set didn't work (skewed residuals), so using data (per species and size) averaged over structures
 
 # DATA PREP
 ## Create dataset
@@ -472,9 +480,8 @@ surv.avg.1 <- surv.avg
 
 ## Transform survival (%) into fraction
 surv.avg.1 <- surv.avg %>% mutate(Condition.f = Condition/100)
-
-## Re-scale so there are no 0 and 1 in the dataset
-surv.avg.1<- surv.avg.1 %>% 
+## Re-scale so there are no 0 and 1 in the dataset (requirement beta models)
+surv.avg.1 <- surv.avg.1 %>% 
   mutate(Condition.fc = (Condition.f * (length(Condition.f) - 1) + 0.5) / length(Condition.f))
 
 ## Set ID
@@ -482,17 +489,31 @@ surv.avg.1 <- tibble::rownames_to_column(surv.avg.1, "ID")
 
 # MODEL
 ## Betareg full model
-## Residuals could not be improved by variable precision nor bias correction
 bm1 <- betareg(Condition.fc ~ Species*Size*Treatment, data = surv.avg.1)
+## Slight improvement in residuals through correction on Treatment*Size + Species
+bm1S <- betareg(Condition.fc ~ Species*Size*Treatment | Treatment*Size+Species, data = surv.avg.1)
 
 ## Model selection fixed part
-car::Anova(bm1) # Three way interaction significant
+car::Anova(bm1S) # Three way interaction significant
+
+## Show simple main effects (not plotted below)
+### Treatment
+hsd.surv.T <- emmeans(bm1S, specs = pairwise ~ Treatment, adjust = "tukey")
+multcomp::cld(hsd.surv.T$emmeans, reversed = TRUE, alpha = 0.05, Letters = letters) # get CLD
+### Species
+hsd.surv.s <- emmeans(bm1S, specs = pairwise ~ Species, adjust = "tukey")
+multcomp::cld(hsd.surv.s$emmeans, reversed = TRUE, alpha = 0.05, Letters = letters) # get CLD
+### Size
+hsd.surv.si <- emmeans(bm1S, specs = pairwise ~ Size, adjust = "tukey")
+multcomp::cld(hsd.surv.si$emmeans, reversed = TRUE, alpha = 0.05, Letters = letters) # get CLD
+
+
 
 ```
-## Model validation
-```{r AVG survival: model validation}
+## Validation - Condition
+```{r condition validation}
 
-mod <- bm1 # set model to be validated
+mod <- bm1S # set model to be validated
 op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
 plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
 abline(0,0)
@@ -508,8 +529,8 @@ plot(fitted(mod) ~ surv.avg.1$Condition.fc) # response data vs fitted
 par(op)
 
 ```
-## Post hoc and plots
-```{r AVG survival: plots}
+## Post hoc and plots - Condition
+```{r condition plots}
 
 # Species * Size * Treatment plot
 # Get averages
@@ -523,7 +544,7 @@ surv.summary.SST <- tibble::rownames_to_column(surv.summary.SST, "ID")
 surv.summary.SST <- surv.summary.SST[order(surv.summary.SST$Finder),]
 
 # Post hoc comparison
-hsd.surv.SST <- emmeans(bm1, specs = pairwise ~ Treatment | Species * Size, adjust = "tukey") 
+hsd.surv.SST <- emmeans(bm1S, specs = pairwise ~ Treatment | Species * Size, adjust = "tukey") 
 sig.letters.surv.SST <- multcomp::cld(hsd.surv.SST$emmeans, alpha = 0.05, Letters = letters, decreasing = T) # get CLD
 
 # Create ID and order dataframe by name (equals Finder of surv.summary.SST dataframe)
@@ -539,8 +560,8 @@ surv.summary.SST <- cbind(surv.summary.SST, siglet = sig.letters.surv.SST$.group
 surv.summary.SST <- surv.summary.SST[order(as.numeric(surv.summary.SST$ID)),]
 
 # Labels facet grip
-spec.labs <- c("A. cf muricata", "A. verweyi", "P. verrucosa", "P. cylindrica")
-names(spec.labs) <- c("Acropora cf muricata", "Acropora verweyi", "Pocillopora verrucosa", "Porites cylindrica")
+spec.labs <- c("A. cf. muricata", "A. verweyi", "P. verrucosa", "P. cylindrica")
+names(spec.labs) <- c("Acropora cf. muricata", "Acropora verweyi", "Pocillopora verrucosa", "Porites cylindrica")
 
 # Plot Species*Size*Treatment bar graph + error bars + letters
 ggplot(surv.summary.SST, aes(x = Size, fill = Treatment, y = Condition))+
@@ -560,7 +581,8 @@ ggplot(surv.summary.SST, aes(x = Size, fill = Treatment, y = Condition))+
     strip.text.y = element_text(size = 12, face = "bold.italic")
     )+
 scale_x_discrete(labels= c("Small", "Medium", "Large"))+
-scale_y_continuous(breaks= c(0, 50, 100), limits = c(0,120))
+scale_y_continuous(breaks= c(0, 50, 100), limits = c(0,120))+
+guides(fill=guide_legend(title="Cleaning frequency:"))
 ggsave("Survival(AVG)_Species x Size x Treatment.tiff", width = 18, height = 23, units = "cm", dpi=1200, compression = "lzw")
 
 # Species * Treatment plot
@@ -574,7 +596,7 @@ surv.summary.TSp <- tibble::rownames_to_column(surv.summary.TSp, "ID")
 surv.summary.TSp <- surv.summary.TSp[order(surv.summary.TSp$Finder),]
 
 # Post hoc comparison
-hsd.surv.TSp <- emmeans(bm1, specs = pairwise ~ Treatment|Species, adjust = "tukey") 
+hsd.surv.TSp <- emmeans(bm1S, specs = pairwise ~ Treatment|Species, adjust = "tukey") 
 sig.letters.surv.TSp <- multcomp::cld(hsd.surv.TSp$emmeans, alpha = 0.05, Letters = letters, decreasing = T) # get CLD
 
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
@@ -621,7 +643,7 @@ surv.summary.TSi <- tibble::rownames_to_column(surv.summary.TSi, "ID")
 surv.summary.TSi <- surv.summary.TSi[order(surv.summary.TSi$Finder),]
 
 # Post hoc comparison
-hsd.surv.TSi <- emmeans(bm1, specs = pairwise ~ Treatment|Size, adjust = "tukey") 
+hsd.surv.TSi <- emmeans(bm1S, specs = pairwise ~ Treatment|Size, adjust = "tukey") 
 sig.letters.surv.TSi <- multcomp::cld(hsd.surv.TSi$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
 
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
@@ -668,7 +690,7 @@ surv.summary.SS <- tibble::rownames_to_column(surv.summary.SS, "ID")
 surv.summary.SS <- surv.summary.SS[order(surv.summary.SS$Finder),]
 
 # Post hoc comparison
-hsd.surv.SS <- emmeans(bm1, specs = pairwise ~ Size|Species, adjust = "tukey") 
+hsd.surv.SS <- emmeans(bm1S, specs = pairwise ~ Size|Species, adjust = "tukey") 
 sig.letters.surv.SS <- multcomp::cld(hsd.surv.SS$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
 
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
@@ -713,7 +735,7 @@ surv.summary.T <- tibble::rownames_to_column(surv.summary.T, "ID")
 surv.summary.T <- surv.summary.T[order(as.character(surv.summary.T$Treatment)),]
 
 # Post hoc comparison
-hsd.surv.T <- emmeans(bm1, specs = pairwise ~ Treatment, adjust = "tukey") 
+hsd.surv.T <- emmeans(bm1S, specs = pairwise ~ Treatment, adjust = "tukey") 
 sig.letters.surv.T <- multcomp::cld(hsd.surv.T$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
 
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
@@ -745,65 +767,78 @@ scale_y_continuous(breaks= c(0, 25, 50, 75, 100))
 
 ```
 
-# Production analysis
-## Log-link model
-```{r Production: Log-link model selection}
+# PRODUCTION analysis
+## Model - Production
+```{r model production}
 
 # DATA PREP
 ## Create subset for Production data
-P.data <- clean.data.1 %>% select(-c("Length", "Cause_death", "Condition", "SGR"))
-P.data[is.na(P.data)] <- -100 # Set fragments that died to -100% volume increase
-P.data <- subset(P.data, Date == "Average") ## Focus on percentage increase in EV over whole study period
-colnames(P.data)[which(names(P.data) == "EV")] <- "EV.increase"
+P.data <- clean.data.1 %>% select(-c("Length", "Condition", "SGR"))
+
+# Summarize start values
+P.data.start <- subset(P.data, Date == "10/2018")
+P.data.start <- data_summary(P.data.start, varname = "EV", groupnames = c("Treatment", "Species", "Size"))
+P.data.start <- select(P.data.start, c("Treatment", "Species", "Size", "EV"))
+names(P.data.start)[names(P.data.start) == "EV"] <- "EV_0"
+
+# Summarize end values
+P.data.end <- subset(P.data, Date == "10/2019")
+P.data.end <- data_summary(P.data.end, varname = "EV", groupnames = c("Size"))
+
+# Calculate EV increase by taking EV_end - EV_start
+P.data <- subset(P.data, Cause_death != "Fused" | is.na(Cause_death)) # Exclude fragments that merged together
+P.data <- subset(P.data, Date == "10/2018" | Date == "10/2019") ## Subset start and end
+P.data <- select(P.data, -c("Cause_death", "Comments"))
+P.data[is.na(P.data)] <- 0 # Set fragments that died to 0 ecological volume
+## Switch long and wide for calculation
+P.data <- as.data.frame(append(P.data, list(wave = ifelse(P.data$Date == "10/2018", 1, 2)), after = 0))
+P.data <- widen_panel(panel_data(P.data), separator = "_")
+P.data <- P.data[!is.na(P.data$Date_2),] # Omit missing data (missing fragments)
+P.data$EV.increase_1 <- 0
+P.data$EV.increase_2 <- P.data$EV_2 - P.data$EV_1
+P.data <- as.data.frame(long_panel(P.data, prefix = "_", begin = 1, end = 2, label_location = "end"))
+P.data <- subset(P.data, Date == "10/2019")
+P.data <- select(P.data, c("Treatment", "Structure", "Species", "Size", "EV", "EV.increase"))
 
 # MODEL
 ## Random factor to account for non-independence of fragments within same nursery Structure
-### Full model without random factor
-lm.p.1nr  <- gls(EV.increase ~ Species*Size*Treatment, method = "REML", data = P.data) # AIC = 8438
-
-### Full model with random factor
-lm.p.1  <- lme(EV.increase ~ Species*Size*Treatment, method = "REML", random = ~1 | Structure, 
-               data = P.data) # AIC = 8437
-
-AIC(lm.p.1nr, lm.p.1) # Tree as random factor improves model substantially and solves pseudo-replication
-
-## Heterogeneity
+lm.p.1  <- lme(EV.increase ~ Species*Size*Treatment, random = ~1 | Structure, data = P.data)
 
 ## SQRT transformation of response variable to improve residuals
-### To prevent negatives: add 100% to all (ie go from EV percentage increase to multiplication of EV)
-P.data$EV.increase <- P.data$EV.increase + 100
-
-## Allowing for heterogeneity ( choices based on residual plots)
-lm.p.5  <- lme(sqrt(EV.increase) ~ Species*Size*Treatment, random = ~1 | Structure, method = "ML",
-                  data = P.data)
-lm.p.6 <- lme(sqrt(EV.increase) ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
+## Allowing for heterogeneity (choices based on residual plots)
+lm.p.5 <- lme(EV.increase ~ Species*Size*Treatment, random = ~1 | Structure, data = P.data)
+lm.p.6 <- lme(EV.increase ~ Treatment*Species*Size, random = ~1 | Structure, 
                   data = P.data, weights = varIdent(form = ~1 | Size))
-lm.p.7 <- lme(sqrt(EV.increase) ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
+lm.p.7 <- lme(EV.increase ~ Treatment*Species*Size, random = ~1 | Structure, 
                   data = P.data, weights = varIdent(form = ~1 | Species))
-lm.p.8 <- lme(sqrt(EV.increase) ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
+lm.p.8 <- lme(EV.increase ~ Treatment*Species*Size, random = ~1 | Structure, 
                   data = P.data, weights = varIdent(form = ~1 | Treatment))
-lm.p.9 <- lme(sqrt(EV.increase) ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
+lm.p.9 <- lme(EV.increase ~ Treatment*Species*Size, random = ~1 | Structure, 
                   data = P.data, weights = varIdent(form = ~1 | Treatment*Size))
-lm.p.10 <- lme(sqrt(EV.increase) ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
-                  data = P.data, weights = varIdent(form = ~1 | Treatment*Species))
-lm.p.11 <- lme(sqrt(EV.increase) ~ Treatment*Species*Size, method = "ML", random = ~1 | Structure, 
-                  data = P.data, weights = varIdent(form = ~1 | Size*Species))
+lm.p.10 <- lme(EV.increase ~ Treatment*Species*Size, random = ~1 | Structure, 
+                  data = P.data, weights = varIdent(form = ~1 | Species*Size))
 
-# lm.p.11 shows low AIC and shows best residuals
-AIC(lm.p.5, lm.p.6, lm.p.7, lm.p.8, lm.p.9, lm.p.10, lm.p.11)
+# lm.p.10 (Species * Size correction) shows low AIC and shows best residuals
+AIC(lm.p.5, lm.p.6, lm.p.7, lm.p.8, lm.p.9, lm.p.10)
 
 # Model selection
-Anova(lm.p.11) # Three-way interaction not significant, but Species*Size is
+Anova(lm.p.10) # Three-way interaction not significant, Treatment*Size and Species*Size are
+
+## Show simple main effects (not plotted below)
+### Species
+hsd.P.s <- emmeans(lm.p.10, specs = pairwise ~ Species, adjust = "tukey")
+multcomp::cld(hsd.P.s$emmeans, reversed = TRUE, alpha = 0.05, Letters = letters) # get CLD
+### Sizes
+hsd.P.si <- emmeans(lm.p.10, specs = pairwise ~ Size, adjust = "tukey")
+multcomp::cld(hsd.P.si$emmeans, reversed = TRUE, alpha = 0.05, Letters = letters) # get CLD
 
 ```
-## Model validation
-```{r Production: Log-link model validation}
+## Validation - Production
+```{r validation production}
 
-mod <- lm.p.11
+mod <- lm.p.10
 op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2))
 plot(resid(mod, type = "pearson") ~ fitted(mod))
-abline(0,0)
-plot(log10(P.data$EV.increase), resid(mod, type = "pearson"))
 abline(0,0)
 hist(resid(mod, type = "pearson"), main = "")
 qqnorm(resid(mod, type = "pearson"))
@@ -813,12 +848,66 @@ plot(P.data$Species, resid(mod, type = "pearson"))
 abline(0,0)
 plot(P.data$Treatment, resid(mod, type = "pearson"))
 abline(0,0)
-plot(fitted(mod) ~ log10(P.data$EV.increase))
+plot(fitted(mod) ~ P.data$EV.increase)
 par(op)
 
 ```
-## Post hoc and plots
-```{r Production: Log-link model plot}
+## Plots - Production
+```{r plots production}
+
+# Species * Size * Treatment plot
+# Get averages
+P.summary.SST <- data_summary(P.data, varname = "EV.increase", groupnames = c("Species", "Size", "Treatment"))
+# Create unique Finder for each Species*Size*Treatment combination
+P.summary.SST <- as.data.frame(append(P.summary.SST,
+    list(Finder = paste(paste(P.summary.SST$Species, P.summary.SST$Size, sep=":"), P.summary.SST$Treatment,
+    sep=":")), after = 0))
+# Create ID and order dataframe by name of Finder
+P.summary.SST <- tibble::rownames_to_column(P.summary.SST, "ID")
+P.summary.SST <- P.summary.SST[order(P.summary.SST$Finder),]
+
+# Post hoc comparison
+hsd.P.SST <- emmeans(lm.p.10, specs = pairwise ~ Treatment | Species * Size, adjust = "tukey") 
+sig.letters.P.SST <- multcomp::cld(hsd.P.SST$emmeans, alpha = 0.05, Letters = letters, decreasing = T) # get CLD
+
+# Create ID and order dataframe by name (equals Finder of surv.summary.SST dataframe)
+sig.letters.P.SST <- tibble::rownames_to_column(sig.letters.P.SST, "Group")
+sig.letters.P.SST <- as.data.frame(append(sig.letters.P.SST,
+     list(Finder = paste(paste(sig.letters.P.SST$Species, sig.letters.P.SST$Size, sep=":"), sig.letters.P.SST$Treatment,
+    sep=":")), after = 0))
+sig.letters.P.SST <- sig.letters.P.SST[order(sig.letters.P.SST$Finder),]
+sig.letters.P.SST <- sig.letters.P.SST %>% mutate(.group = str_squish(.group)) # remove white spaces
+
+# Merge sig.letter dataframe into the summary dataframe
+P.summary.SST <- cbind(P.summary.SST, siglet = sig.letters.P.SST$.group)
+P.summary.SST <- P.summary.SST[order(as.numeric(P.summary.SST$ID)),]
+
+# Labels facet grip
+spec.labs <- c("A. cf. muricata", "A. verweyi", "P. verrucosa", "P. cylindrica")
+names(spec.labs) <- c("Acropora cf. muricata", "Acropora verweyi", "Pocillopora verrucosa", "Porites cylindrica")
+
+# Plot Species*Size*Treatment bar graph + error bars + letters
+ggplot(P.summary.SST, aes(x = Size, fill = Treatment, y = EV.increase))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = expression(paste("Volume increase (", cm^3,")")), x = "Size")+ facet_grid(rows=vars(Species), labeller = labeller(Species = spec.labs)) +
+  scale_y_continuous(expand = c(0, 0), breaks = c(0, 2000, 4000, 6000), limits = c(-50, 8900))+
+  geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2,
+                position=position_dodge(.9))+
+  geom_text(data = P.summary.SST, aes(x=Size, y = EV.increase + se+250, label = siglet), vjust=0,
+                position=position_dodge(.9))+
+  scale_fill_manual(values=c("#A9A9A9", "#7A7A7A", "#5A5A5A", "#3A3A3A"))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    axis.title.x = element_text(color="black", vjust=-2, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold.italic", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+    strip.text.y = element_text(size = 12, face = "bold.italic"),
+    axis.ticks.length.x=unit(2,"mm")
+    )+
+scale_x_discrete(labels= c("Small", "Medium", "Large"))+
+guides(fill=guide_legend(title="Cleaning frequency:"))
+#ggsave("Production_Species x Size x Treatment.tiff", width = 18, height = 23, units = "cm", dpi=1200, compression = "lzw")
 
 # Size*Species plot
 # Get averages
@@ -832,8 +921,8 @@ P.summary.SS <- tibble::rownames_to_column(P.summary.SS, "ID")
 P.summary.SS <- P.summary.SS[order(as.character(P.summary.SS$Finder)),]
 
 # Perform post hoc and get significance letters (Compact Letter Display) between Sizes within each Species
-hsd.P.SS <- emmeans(lm.p.11, specs = pairwise ~ Size|Species, adjust = "tukey")
-sig.letters.P.SS <- multcomp::cld(hsd.P.SS$emmeans, decreasing = TRUE, alpha = 0.05, Letters = letters) # get CLD
+hsd.P.SS <- emmeans(lm.p.10, specs = pairwise ~ Size|Species, adjust = "tukey")
+sig.letters.P.SS <- multcomp::cld(hsd.P.SS$emmeans, decreasing = FALSE, alpha = 0.05, Letters = letters) # get CLD
 
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SS dataframe)
 sig.letters.P.SS <- as.data.frame(append(sig.letters.P.SS,
@@ -848,7 +937,7 @@ P.summary.SS <- P.summary.SS[order(as.numeric(P.summary.SS$ID)),]
 # Plot Species*Size
 EV_SpeciesxSize <- ggplot(P.summary.SS, aes(x = Species, fill = Size, y = EV.increase))+
   geom_bar(stat = "identity", position = position_dodge())+ 
-  labs(y = "EV increase (%)", x = "Species")+
+  labs(y = expression(paste("Volume increase (", cm^3,")")), x = "Species")+
   scale_y_continuous(expand = c(0, 0), breaks = c(0, 3000, 6000), limits = c(0, 9000))+
   geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2, position=position_dodge(.9))+
   geom_text(data = P.summary.SS, aes(x=Species, y = EV.increase + se+200, label = siglet),
@@ -860,17 +949,17 @@ EV_SpeciesxSize <- ggplot(P.summary.SS, aes(x = Species, fill = Size, y = EV.inc
     axis.text.x = element_text(angle = 0, size=12, face = "bold.italic", vjust=0.5),
     axis.title.y = element_text(color="black" , vjust=4, size = 12),
     axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
-    legend.position="none",
-    axis.ticks.length.x = unit(c(0,2), "mm")
+    axis.ticks.length.x = unit(c(0,2), "mm"),
+    legend.position="none"
     )+
-scale_x_discrete(labels= c("A. cf muricata", "A. verweyi", "P. verrucosa", "P. cylindrica"))
-#ggsave("Production(LOG)_Species x Size.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+scale_x_discrete(labels= c("A. cf. muricata", "A. verweyi", "P. verrucosa", "P. cylindrica"))
+#ggsave("Production_Species x Size.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Treatment*Species plot
+# Treatment*Species plot (no significant differences in post hoc)
 # Get averages
 P.summary.TS <- data_summary(P.data, varname = "EV.increase", groupnames = c("Species", "Treatment"))
 
-# Create unique Finder for each Species*Size combination
+# Create unique Finder for each Treatment*Species combination
 P.summary.TS <- as.data.frame(append(P.summary.TS,
     list(Finder = paste(P.summary.TS$Species, P.summary.TS$Treatment, sep=":")), after = 0))
 # Create ID and order dataframe by name of Finder
@@ -878,7 +967,7 @@ P.summary.TS <- tibble::rownames_to_column(P.summary.TS, "ID")
 P.summary.TS <- P.summary.TS[order(as.character(P.summary.TS$Finder)),]
 
 # Perform post hoc and get significance letters (Compact Letter Display) between Sizes within each Species
-hsd.P.TS <- emmeans(lm.p.11, specs = pairwise ~ Treatment|Species, adjust = "tukey")
+hsd.P.TS <- emmeans(lm.p.10, specs = pairwise ~ Treatment|Species, adjust = "tukey")
 sig.letters.P.TS <- multcomp::cld(hsd.P.TS$emmeans, decreasing = TRUE, alpha = 0.05, Letters = letters) # get CLD
 
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SS dataframe)
@@ -894,8 +983,8 @@ P.summary.TS <- P.summary.TS[order(as.numeric(P.summary.TS$ID)),]
 # Plot Species*Size bar graph + error bars + letters
 EV_TreatmentxSpecies <- ggplot(P.summary.TS, aes(x = Species, fill = Treatment, y = EV.increase))+
   geom_bar(stat = "identity", position = position_dodge())+ 
-  labs(y = "EV increase (%)", x = "Species")+
-  scale_y_continuous(expand = c(0, 0), breaks = c(0, 3000, 6000), limits = c(0, 8000))+
+  labs(y = expression(paste("Volume increase (", cm^3,")")), x = "Species")+
+  scale_y_continuous(expand = c(0, 0), breaks = c(0, 2000, 4000), limits = c(0, 5000))+
   geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2, position=position_dodge(.9))+
   geom_text(data = P.summary.TS, aes(x=Species, y = EV.increase + se+200, label = siglet),
             vjust=0, position = position_dodge(.9))+
@@ -906,17 +995,17 @@ EV_TreatmentxSpecies <- ggplot(P.summary.TS, aes(x = Species, fill = Treatment, 
     axis.text.x = element_text(angle = 0, size=12, face = "bold.italic", vjust=0.5),
     axis.title.y = element_text(color="black" , vjust=4, size = 12),
     axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
-    legend.position="none",
-    axis.ticks.length.x = unit(c(0,2), "mm")
+    axis.ticks.length.x = unit(c(0,2), "mm"),
+    legend.position="none"
     )+
-scale_x_discrete(labels= c("A. cf muricata", "A. verweyi", "P. verrucosa", "P. cylindrica"))
-#ggsave("Production(LOG)_Species x Treatment.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+scale_x_discrete(labels= c("A. cf. muricata", "A. verweyi", "P. verrucosa", "P. cylindrica"))
+#ggsave("Production_Species x Treatment.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Treatment x Size
+# Treatment x Size (no significant differences in post hoc)
 # Get averages
 P.summary.TSI <- data_summary(P.data, varname = "EV.increase", groupnames = c("Treatment", "Size"))
 
-# Create unique Finder for each Species*Size combination
+# Create unique Finder for each Treatment*Size combination
 P.summary.TSI <- as.data.frame(append(P.summary.TSI,
     list(Finder = paste(P.summary.TSI$Treatment, P.summary.TSI$Size, sep=":")), after = 0))
 # Create ID and order dataframe by name of Finder
@@ -924,7 +1013,7 @@ P.summary.TSI <- tibble::rownames_to_column(P.summary.TSI, "ID")
 P.summary.TSI <- P.summary.TSI[order(as.character(P.summary.TSI$Finder)),]
 
 # Perform post hoc and get significance letters (Compact Letter Display) between Sizes within each Species
-hsd.P.TSI <- emmeans(lm.p.11, specs = pairwise ~ Treatment|Size, adjust = "tukey")
+hsd.P.TSI <- emmeans(lm.p.10, specs = pairwise ~ Treatment|Size, adjust = "tukey")
 sig.letters.P.TSI <- multcomp::cld(hsd.P.TSI$emmeans, decreasing = TRUE, alpha = 0.05, Letters = letters) # get CLD
 
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SS dataframe)
@@ -940,8 +1029,8 @@ P.summary.TSI <- P.summary.TSI[order(as.numeric(P.summary.TSI$ID)),]
 # Plot Treatment*Size
 EV_TreatmentxSize <- ggplot(P.summary.TSI, aes(x = Size, fill = Treatment, y = EV.increase))+
   geom_bar(stat = "identity", position = position_dodge())+ 
-  labs(y = "EV increase (%)", x = "Size")+
-  scale_y_continuous(expand = c(0, 0), breaks = c(0, 3000, 6000), limits = c(0, 6500))+
+  labs(y = expression(paste("Volume increase (", cm^3,")")), x = "Size")+
+  scale_y_continuous(expand = c(0, 0), breaks = c(0, 2000, 4000), limits = c(0, 5000))+
   geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2, position=position_dodge(.9))+
   geom_text(data = P.summary.TSI, aes(x=Size, y = EV.increase + se+200, label = siglet),
             vjust=0, position = position_dodge(.9))+
@@ -952,10 +1041,10 @@ EV_TreatmentxSize <- ggplot(P.summary.TSI, aes(x = Size, fill = Treatment, y = E
     axis.text.x = element_text(angle = 0, size=12, face = "bold.italic", vjust=0.5),
     axis.title.y = element_text(color="black" , vjust=4, size = 12),
     axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
-    legend.position="none",
-    axis.ticks.length.x = unit(c(0,2), "mm")
+    axis.ticks.length.x = unit(c(0,2), "mm"),
+    legend.position="none"
     )
-#ggsave("Production(LOG)_Treatment x Size.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Production_Treatment x Size.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 # Treatment plot
 # Get averages
@@ -965,7 +1054,7 @@ P.summary.T <- data_summary(P.data, varname = "EV.increase", groupnames = c("Tre
 P.summary.T <- P.summary.T[order(as.character(P.summary.T$Treatment)),]
 
 # Post hoc comparison
-hsd.P.T <- emmeans(lm.p.11, specs = pairwise ~ Treatment, adjust = "tukey", type = "response") 
+hsd.P.T <- emmeans(lm.p.10, specs = pairwise ~ Treatment, adjust = "tukey", type = "response") 
 sig.letters.P.T <- multcomp::cld(hsd.P.T$emmeans, alpha = 0.05, Letters = letters, decreasing = T)
 
 # Create ID and order dataframe by name (equals Finder of sgr.summary.SST dataframe)
@@ -977,10 +1066,10 @@ P.summary.T <- cbind(P.summary.T, siglet = sig.letters.P.T$.group)
 P.summary.T <- tibble::rownames_to_column(P.summary.T, "ID")
 P.summary.T <- P.summary.T[order(as.numeric(P.summary.T$ID)),]
 
-# Plot Species*Treatment bar graph + error bars + letters
+# Plot Treatment bar graph + error bars + letters
 ggplot(P.summary.T, aes(x = Treatment, y = EV.increase))+
   geom_bar(stat = "identity", position = position_dodge())+ 
-  labs(y = "EV increase (%)", x = "Treatment")+
+  labs(y = expression(paste("Volume increase (", cm^3,")")), x = "Treatment")+
   geom_errorbar(aes(ymin=EV.increase-(1*se), ymax=EV.increase+(1*se)), width=.2,
                 position=position_dodge(.9))+
   geom_text(data = P.summary.T, aes(x=Treatment, y = EV.increase + se+100, label = siglet), vjust=0,
@@ -990,29 +1079,35 @@ ggplot(P.summary.T, aes(x = Treatment, y = EV.increase))+
     axis.title.x = element_text(color="black", vjust=-2, size = 12),
     axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
     axis.title.y = element_text(color="black" , vjust=4, size = 12),
-    axis.text.y=element_text(size=12, face = "bold", vjust=0.5)
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+    legend.position="none"
     )+
 scale_x_discrete(labels= c("Weekly", "Monthly", "Quarterly", "Never"))
-#ggsave("Production(LOG)_Treatment.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Production_Treatment.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 ```
+## Costs - Production
+```{r production costs}
 
-```{r Production: costs}
-
-# Costs per treatment
-P.costs <- P.summary.TS[,c(1,3,4,5)]
-# Match EV.increase as multiplication factor (as used in costs calculations): i.e. 100% is no change (x1)
-P.costs$EV.increase <- P.costs$EV.increase + 100
-
-# Calculate duration for each Treatment to reach 4000% increase (40x initial fragment size)
-## Using average values across the three Sizes
+# Calculate duration for each Treatment to reach 300 increase in EV (aka grow 1 full normal fragment)
 ## By combining formula of SGR = LN(EV_t/EV_0)/t_nursery and EV_end = EV_start * e^SGR*t_needed:
 ## t_needed = LN(EV_end/EV_start)/(LN(EV_t/EV_0)/t_nursery
-## Where EV_t and EV_0 are realized start and end volumes per treatment, and EV_start and EV_end are the desired start and end volumes for which the nursery duration will be calculated, t_needed is days needed for fragment to reach desired end volume and t_nursery is days actual fragments were in the nursery (365)
-## All volumes are expressed as multiplication factor in percentages, eg EV increase of 100% means fragments remained same size and EV increase of 200% means the volume doubled
+## Where EV_t and EV_0 are realized start and end volumes per treatment, and EV_start and EV_end are the desired start and end volumes for which the nursery duration will be calculated (start size per size category + 300), t_needed is days needed for fragment to reach desired end volume and t_nursery is days actual fragments were in the nursery (365)
+
+# Get EV_t
+P.costs <- data_summary(P.data, varname = "EV", groupnames = c("Treatment", "Species", "Size"))
+P.costs <- P.costs[,c(1,2,3,4)]
+names(P.costs)[names(P.costs) == "EV"] <- "EV_t"
+
+# Merge EV_0 and EV_t
+P.costs$EV_0 <- P.data.start$EV_0
+
+# Set EV_start and EV_end per size category
+P.costs$EV_start <- ifelse(P.costs$Size == "Small", 3, ifelse(P.costs$Size == "Medium", 30, 300))
+P.costs$EV_end <- P.costs$EV_start + 300
 
 # Add days needed to reach target volume based on EV.increase
-P.costs <- P.costs %>% mutate(Days = log(1600/100)/(log((EV.increase)/100)/365))
+P.costs <- P.costs %>% mutate(Days = log(EV_end/EV_start)/(log((EV_t)/EV_0)/365))
 
 # Calculate cleaning costs (number of times cleaning * costs)
 ## Set cleaning interval
@@ -1023,19 +1118,18 @@ P.costs$Interval <- ifelse(P.costs$Treatment == "Weekly", 7,
 ## Calculate number of cleaning visits needed per growth cycle (y)
 P.costs <- P.costs %>% mutate(Cleaning.visits = Days/Interval) 
 P.costs$Cleaning.visits[P.costs$Treatment == "Never"] <- 0 # No cleaning for Never cleaning Treatment
-# Specify number of trees cleaned in one visit by a buddy pair (i.e. less trees are cleaned when they are dirtier)
-P.costs <- P.costs %>% plyr::mutate(Trees.cleaned = c(5, 4, 3, 1)) 
 
-## Define costs for tree construction and deployment
+# Define costs for tree construction and deployment
 ## Construction costs (materials + wage (8h to make 1 tree)) divided by life span (5 cycles = 5 years) + deployment diving + wages (2 divers * 3.5 h deployment for 3 trees)
 dive.cost <- 16 # USD: 15 EUR per dive per diver
 material.cost <- 17.05 # USD: Cement, PVC, loops etc (see Masterplan Excel), in 2019 USD
 hour.wage <- 0.46 # USD: 500 ksh for a 8h day
-initial.cost.structure <- material.cost + hour.wage*8 # Divide by 5, assuming a structure will last 5 cycles
+initial.cost.structure <- material.cost + hour.wage*8 
 initial.costs.deployment <- (dive.cost*2 + hour.wage*2*2)/3 # Divided by 3, as values were for 3 trees
 
-## Calculate cleaning costs based on cleaning visits, dive costs and wages
+## Calculate cleaning costs based on cleaning visits (2hr), dive costs (2 buddies) and wages. Divided by 6, as around 6 trees can be cleaned in a single cleaning visit
 cleaning.costs <- (dive.cost*2 + hour.wage*2*2)/6
+# Costs_1 = cleaning costs per tree (named for long format)
 P.costs <- P.costs %>% 
   mutate(Costs_1 = Cleaning.visits*cleaning.costs)
 ## Adjust structure costs depending on how many cycles will fit during 1 structure lifetime (5 years)
@@ -1044,9 +1138,18 @@ P.costs$Costs_deployment <- initial.costs.deployment # Deployment costs are alwa
 
 ## Total the costs for cleaning, materials & deployment per structure
 P.costs <- add_column(P.costs, Costs_tot = P.costs$Costs_1 + P.costs$Costs_structure + P.costs$Costs_deployment, .after = 2)
-## Isolate the costs needed for each nursery round
-P.costs$Costs_2 <- P.costs$Costs_structure + P.costs$Costs_deployment
-P.costs <- select(P.costs, -c("Costs_structure", "Costs_deployment"))
+## Acquiring corals: costs divided by number of start coral sizes can be acquired from a grown fragment of 300 EV
+P.costs$Costs_coral <- ifelse(P.costs$Size == "Small", P.costs$Costs_tot/(10*100), 
+                       ifelse(P.costs$Size == "Medium", P.costs$Costs_tot/(10*10),
+                       ifelse(P.costs$Size == "Large", P.costs$Costs_tot/(10*1), 999)))
+## Define costs_2: costs other than cleaning (structure, deployment, acquiring corals)
+P.costs$Costs_2 <- P.costs$Costs_structure + P.costs$Costs_deployment + P.costs$Costs_coral
+# Update total costs to include aqcuiring coral costs
+P.costs$Costs_tot <- P.costs$Costs_tot + P.costs$Costs_coral
+## Set summary data frame aside before removing details
+P.costs.sum <- select(P.costs, c("Treatment", "Species", "Size", "Costs_tot", "Costs_1", "Costs_2",
+                                 "Costs_structure", "Costs_deployment", "Costs_coral")) 
+P.costs <- select(P.costs, -c("Costs_structure", "Costs_deployment", "Costs_coral"))
 
 # Get into long format
 P.costs <- as.data.frame(long_panel(P.costs, prefix = "_", begin = 1, end = 2, label_location = "end"))
@@ -1063,20 +1166,22 @@ scaleFUN <- function(x) sprintf("%.2f", x) # Get two decimals on y-axis
 
 ggplot(P.costs, aes(x = Treatment, y = Costs.fragment, fill = `Cost type`))+
   geom_bar(position = "stack", stat="identity")+
-  facet_wrap(~Species, nrow = 4, strip.position = "right")+
+  facet_grid(Species~Size)+
   labs(y = "Cost per fragment (2019 USD)",
-       x = "Cleaning treatment")+
-  scale_y_continuous(limits=c(0, 7), labels=scaleFUN)+
+       x = "Cleaning frequency")+
+  scale_y_continuous(expand = c(0,0), limits=c(0, 11), breaks = c(0, 2, 4, 6, 8),  labels=scaleFUN)+
   theme_economist()+scale_colour_economist()+
   scale_fill_manual(values=c("#A9A9A9", "#3A3A3A"))+
   theme(
-    axis.title.x = element_text(color="black", vjust=-2, size = 12),
-    axis.text.x=element_text(size=12, face = "bold", vjust=0.5),
+    axis.title.x = element_text(color="black", vjust=-2, size = 11),
+    axis.text.x = element_text(size=11, face = "bold", vjust=0.5, hjust = 0, angle = -30),
     axis.title.y = element_text(color="black" , vjust=4, size = 12),
     axis.text.y=element_text(size=11, vjust=0.5),
-    strip.text.y = element_text(size = 12, face = "bold.italic")
+    strip.text.y = element_text(size = 12, face = "bold.italic"),
+    axis.ticks.length.x = unit(c(0,2), "mm")
     )+ 
-  geom_text(aes(label = ifelse(is.na(Costs_tot), "", paste0("$",  format(round(Costs_tot, digits = 2), nsmall = 2)))), vjust = -1.2, size = 5, color="black", fontface = "bold")
+  geom_text(aes(label = ifelse(is.na(Costs_tot), "", paste0("$",  format(round(Costs_tot, digits = 2), nsmall = 2)))), vjust = -1.2, size = 4, color="black", fontface = "bold")+
+    guides(fill=guide_legend(title="Cost type:"))
 ggsave("Cost per fragment.tiff", width = 18, height = 23, units = "cm", dpi=1200, compression = "lzw")
 
 ```
@@ -1102,9 +1207,23 @@ ggsave("SGR_Survival_EV_TreatmentxSize.tiff", width = 18, height = 24, units = "
 
 ```
 
+# Correlation Size x SGR
+```{r correlation}
+
+cordat <- clean.data.1[!is.na(clean.data.1$SGR),]
+cordat <- subset(cordat, Date != "Average")
+
+ggplot(cordat, aes(x=EV, y=SGR, colour = Size)) + geom_point() + facet_wrap(~Species, nrow = 4, strip.position = "right")+
+   geom_smooth(method=lm)+
+   scale_y_continuous(limits=c(-0.03, 0.03))
+
+#ggsave("Cor.tiff", width = 18, height = 23, units = "cm", dpi=1200, compression = "lzw")
+
+```
+
 
 # Check packages used
-```{r}
+```{r check packages}
 
 knitr::purl("Clean.Rmd")
 list.functions.in.file("Clean.R")
